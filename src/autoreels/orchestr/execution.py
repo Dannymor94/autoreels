@@ -69,6 +69,8 @@ def _live(job: Job, worker_id: str, fence: int, now: int):
 
 def claim(job: Job, target_id: str, worker_id: str, now: int, ttl: int) -> Job:
     _time(now, ttl)
+    if worker_id is None:
+        raise ValueError("worker identity required")
     if job.status != "queued" or target_id != job.request.target_id or job.fence >= MAX_ATTEMPTS:
         raise Conflict("job cannot be claimed")
     return _change(job, status="running", worker_id=worker_id, fence=job.fence + 1,
@@ -135,6 +137,8 @@ def reconcile_artifact(job: Job, artifact_sha256: str) -> Job:
     """Trusted coordinator only AFTER verifying the exact artifact and process exit."""
     if job.status != "reconcile" or job.cancel_requested:
         raise Conflict("artifact cannot be accepted")
+    if artifact_sha256 is None:
+        raise ValueError("validated artifact digest required")
     return _change(job, status="success", artifact_sha256=artifact_sha256,
                    worker_id=None, expires_ms=None)
 

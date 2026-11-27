@@ -95,6 +95,8 @@ def test_renewal_bounded_retries_and_existing_artifact():
     with pytest.raises(e.Conflict):
         e.expire(j,20)
     j = e.expire(j,31)
+    with pytest.raises(ValueError):
+        e.reconcile_artifact(j,None)
     done = e.reconcile_artifact(j,"d"*64)
     assert done.status == "success" and done.artifact_sha256 == "d"*64
     j = e.reconcile_stopped(j,retry=True)
@@ -103,3 +105,8 @@ def test_renewal_bounded_retries_and_existing_artifact():
     assert e.reconcile_stopped(j,retry=True).status == "failed"
     with pytest.raises(ValueError):
         e.claim(e.Job(request=request()),"mac1","worker1",0,e.MAX_LEASE_MS+1)
+
+
+def test_claim_requires_worker_identity():
+    with pytest.raises(ValueError):
+        e.claim(e.Job(request=request()),"mac1",None,0,10)
