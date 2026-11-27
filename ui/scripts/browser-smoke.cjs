@@ -67,6 +67,13 @@ async function mock(page, mode = "normal") {
       }
       return route.fulfill({status:200,contentType:"video/mp4",body:fixture,headers:{"Accept-Ranges":"bytes"}});
     }
+    if (path === "/api/pipeline-settings") {
+      const clips=url.searchParams.get("clips"), profile=url.searchParams.get("profile");
+      return route.fulfill({json:{schema_version:1,analysis_status:"configured",render_status:"configured",
+        analysis:{base_clips:5,clips_every_min:2,min_sec:25,target_sec:55,max_sec:90,configured_mode:"autocut",label_min_sec:30,label_max_sec:60},
+        render:{width:1080,height:1920,profile:"h264",profiles:["h264","hevc"],role:"both",loudnorm_enabled:true,denoise_enabled:false,music_enabled:false},
+        draft_clips:clips?Number(clips):null,draft_profile:profile,preview_status:clips||profile?"valid":"not_requested",execution_enabled:false}});
+    }
     if (path === "/api/render-targets") return route.fulfill({json: {
       schema_version:1, modes:[{kind:"desktop",integration:"cli_adapter_pending"},{kind:"remote",integration:"cli_adapter_pending"},{kind:"mobile",integration:"device_spike_pending"}],
       targets:[],execution_enabled:false
@@ -101,7 +108,16 @@ async function main() {
           await page.getByRole("radio",{name:/На телефоне/}).check();
           await page.getByText("Подключённых исполнителей нет",{exact:true}).waitFor();
           assert.equal(await page.getByRole("button",{name:"Запустить рендер",exact:true}).isDisabled(),true);
-          await layout(page,"390 render modes");
+          await page.getByLabel("Число роликов для пробной настройки").fill("7");
+          await page.getByLabel("Профиль для пробной настройки").selectOption("hevc");
+          const previewRequest=page.waitForRequest(req=>req.url().includes("/api/pipeline-settings?"));
+          await page.getByRole("button",{name:"Проверить настройки",exact:true}).click();
+          const previewUrl=new URL((await previewRequest).url());
+          assert.equal(previewUrl.searchParams.get("clips"),"7");
+          assert.equal(previewUrl.searchParams.get("profile"),"hevc");
+          await page.getByText("Пробные параметры допустимы. Ничего не сохранено.",{exact:true}).waitFor();
+          await layout(page,"390 render modes/settings");
+          console.log("PASS read-only configured settings and typed override preview");
           await page.getByRole("button",{name:"Проекты",exact:true}).click();
           await page.locator(".source-row").first().waitFor();
           console.log("PASS explicit render mode, no fake ready target or launch");

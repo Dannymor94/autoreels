@@ -72,3 +72,68 @@ def legacy_reviews(root, stem, clip):
     except (OSError, UnicodeError):
         return []
     return rows[::-1]
+
+
+def pipeline_settings(root, clips=None, profile=None):
+    """Use the same validated loaders as CLI, never serialize their full models.
+
+    This is a preview of two explicit overrides, not a fully effective job
+    configuration. No process, provider, file mutation, or target discovery.
+    """
+    from autoreels.core.config import ConfigError, load_r0_config, load_render_config
+    from . import pipeline_settings as view
+
+    directory = root / "config"
+    r0 = directory / "r0.yaml"
+    render_file = directory / "render.yaml"
+    local = directory / "render.local.yaml"
+    analysis_status = view._file_status(root, r0)
+    render_status = view._file_status(root, render_file)
+    local_status = view._file_status(root, local)
+    if local_status == "blocked":
+        render_status = "blocked"
+
+    analysis = None
+    render = None
+    if analysis_status == "configured":
+        try:
+            cfg = load_r0_config(r0)
+            ac = cfg.autocut
+            analysis = view.AnalysisDefaults(
+                base_clips=ac.clips, clips_every_min=ac.clips_every_min,
+                min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
+                configured_mode=ac.auto_mode,
+                label_min_sec=cfg.min_duration, label_max_sec=cfg.max_duration,
+            )
+        except (ConfigError, OSError, ValueError):
+            analysis_status = "invalid"
+    if render_status == "configured":
+        try:
+            cfg = load_render_config(render_file, local_path=local)
+            if len(cfg.scale) != 2 or any(x <= 0 for x in cfg.scale):
+                raise ValueError("invalid render dimensions")
+            profiles = [name for name in view.PROFILES if name in cfg.encoder.profiles]
+            render = view.RenderDefaults(
+                width=cfg.scale[0], height=cfg.scale[1],
+                profile=cfg.encoder.profile if cfg.encoder.profile in profiles else None,
+                profiles=profiles,
+                role=cfg.role if cfg.role in ("analyze", "render", "both") else "unknown",
+                loudnorm_enabled=cfg.audio_processing.loudnorm_enabled,
+                denoise_enabled=cfg.audio_processing.denoise_enabled,
+                music_enabled=cfg.music.enabled,
+            )
+        except (ConfigError, OSError, ValueError):
+            render_status = "invalid"
+
+    requested = clips is not None or profile is not None
+    valid = (
+        (clips is None or (type(clips) is int and 1 <= clips <= 1000 and analysis is not None))
+        and (profile is None or (render is not None and profile in render.profiles))
+    )
+    return view.PipelineSettings(
+        schema_version=1, analysis_status=analysis_status, analysis=analysis,
+        render_status=render_status, render=render,
+        draft_clips=clips if valid else None, draft_profile=profile if valid else None,
+        preview_status=("valid" if valid else "blocked") if requested else "not_requested",
+        execution_enabled=False,
+    )

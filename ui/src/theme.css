@@ -127,3 +127,10 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .target-detail { border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
 .target-detail h2 { font-size: 16px; }
 .render-start { min-height: 44px; font: inherit; border: 1px solid var(--border); background: var(--bg2); color: var(--fg2); border-radius: 8px; opacity: .7; }
+
+.pipeline-settings { border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: grid; gap: 8px; min-width: 0; }
+.pipeline-settings h2 { font-size: 17px; }
+.pipeline-settings h3 { font-size: 15px; margin-top: 6px; }
+.pipeline-settings label { display: grid; gap: 4px; font-size: 14px; }
+.pipeline-settings input, .pipeline-settings select, .pipeline-settings button { min-height: 44px; min-width: 0; max-width: 100%; font: inherit; color: var(--fg); background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.pipeline-settings button:disabled { opacity: .6; }
