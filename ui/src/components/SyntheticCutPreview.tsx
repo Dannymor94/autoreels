@@ -416,6 +416,20 @@ export function SyntheticCutPreview() {
     }}>{playing?"Пауза":"Смотреть нарезку"}</button>
     {error&&<p role="alert">Видео недоступно; план нарезки можно посмотреть без воспроизведения.</p>}
     <p className="secondary">Предпросмотр пропускает вырезанные интервалы на исходном видео. Стыки приблизительные, без финального рендера.</p>
+    {q.data.longform_review&&<details>
+      <summary>Длинное видео: пример поиска дублей</summary>
+      <p className="secondary">Отдельный синтетический текст без видео. Длительность исходника: {seconds(q.data.longform_review.source_duration_ms/1000)}. Ничего не удаляется автоматически.</p>
+      <p>Возможные повторы: {q.data.longform_review.candidates.length}</p>
+      {q.data.longform_review.candidates.map(candidate=><div key={candidate.earlier+":"+candidate.later}>
+        <strong>{candidate.kind==="exact_text"?"Повтор текста":"Возможный повторный дубль"}</strong>
+        {[candidate.earlier,candidate.later].map(n=>{
+          const s=q.data?.longform_review?.sentences.find(item=>item.number===n);
+          return s?<p key={n}>#{n} · {seconds(s.start_ms/1000)} – {seconds(s.end_ms/1000)} · {s.text}</p>:null;
+        })}
+        <p className="secondary">Совпавших слов: {candidate.matched_tokens}. Проверь смысл обеих фраз перед удалением.</p>
+      </div>)}
+      <p className="secondary">Таймкоды транскрипта, не границы вырезания.</p>
+    </details>}
     <details><summary>История нарезки ({q.data.history.length})</summary>
       {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {(h.navigation==="undo"?"Отмена · ":h.navigation==="redo"?"Повтор · ":"")+(h.crop?"Кадрирование · ":"")+(h.music?"Фон "+h.music[0]+" · "+h.music[1]+"% · ":"")+(h.dip_ms?"Переход "+h.dip_ms+" мс · ":"")+(h.rates?"Скорость: "+h.rates.map(n=>n/100+"×").join(" / "):h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено")}</p>)}
     </details>

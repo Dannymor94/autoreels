@@ -470,6 +470,7 @@ export interface components {
             enabled: boolean;
             /** History */
             history: components["schemas"]["CutSelectionEvent"][];
+            longform_review: components["schemas"]["LongformReview"] | null;
             /** Plan Sha256 */
             plan_sha256: string;
             /** Plans */
@@ -675,6 +676,42 @@ export interface components {
             gate: string;
             /** Verdict */
             verdict: string;
+        };
+        /** LongformCandidate */
+        LongformCandidate: {
+            /** Earlier */
+            earlier: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "exact_text" | "possible_restart";
+            /** Later */
+            later: number;
+            /** Matched Tokens */
+            matched_tokens: number;
+        };
+        /** LongformReview */
+        LongformReview: {
+            /** Candidates */
+            candidates: components["schemas"]["LongformCandidate"][];
+            /** Review Sha256 */
+            review_sha256: string;
+            /** Sentences */
+            sentences: components["schemas"]["LongformSentence"][];
+            /** Source Duration Ms */
+            source_duration_ms: number;
+        };
+        /** LongformSentence */
+        LongformSentence: {
+            /** End Ms */
+            end_ms: number;
+            /** Number */
+            number: number;
+            /** Start Ms */
+            start_ms: number;
+            /** Text */
+            text: string;
         };
         /** ModuleOption */
         ModuleOption: {

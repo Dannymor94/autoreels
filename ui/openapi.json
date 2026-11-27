@@ -506,6 +506,16 @@
             "title": "History",
             "type": "array"
           },
+          "longform_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LongformReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "plan_sha256": {
             "title": "Plan Sha256",
             "type": "string"
@@ -550,7 +560,8 @@
           "clip_uid",
           "current_removed",
           "history",
-          "soundtracks"
+          "soundtracks",
+          "longform_review"
         ],
         "title": "CutDemoView",
         "type": "object"
@@ -1201,6 +1212,100 @@
           "date"
         ],
         "title": "LegacyReview",
+        "type": "object"
+      },
+      "LongformCandidate": {
+        "properties": {
+          "earlier": {
+            "title": "Earlier",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "exact_text",
+              "possible_restart"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "later": {
+            "title": "Later",
+            "type": "integer"
+          },
+          "matched_tokens": {
+            "title": "Matched Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "earlier",
+          "later",
+          "kind",
+          "matched_tokens"
+        ],
+        "title": "LongformCandidate",
+        "type": "object"
+      },
+      "LongformReview": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/LongformCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "review_sha256": {
+            "title": "Review Sha256",
+            "type": "string"
+          },
+          "sentences": {
+            "items": {
+              "$ref": "#/components/schemas/LongformSentence"
+            },
+            "title": "Sentences",
+            "type": "array"
+          },
+          "source_duration_ms": {
+            "title": "Source Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_duration_ms",
+          "review_sha256",
+          "sentences",
+          "candidates"
+        ],
+        "title": "LongformReview",
+        "type": "object"
+      },
+      "LongformSentence": {
+        "properties": {
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "text",
+          "start_ms",
+          "end_ms"
+        ],
+        "title": "LongformSentence",
         "type": "object"
       },
       "ModuleOption": {

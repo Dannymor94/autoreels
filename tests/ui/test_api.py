@@ -392,12 +392,20 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     before = sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*"))
     disabled = client.get("/api/synthetic-cut").json()
     assert disabled["enabled"] is False and disabled["soundtracks"] == []
+    assert disabled["longform_review"] is None
     settings.settings = Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
     response = client.get("/api/synthetic-cut")
     assert response.status_code == 200
     view = response.json()
     assert view["enabled"] and view["source_duration"] == 3
     assert len(view["sentences"]) == 3
+    review = view["longform_review"]
+    assert review["source_duration_ms"] == 20000
+    assert len(review["review_sha256"]) == 64
+    assert [(p["earlier"],p["later"],p["kind"]) for p in review["candidates"]] == [
+        (1,2,"exact_text"),(3,4,"possible_restart")]
+    assert [s["number"] for s in review["sentences"]] == [1,2,3,4,5]
+    assert all(0 <= s["start_ms"] < s["end_ms"] <= 20000 for s in review["sentences"])
     from hashlib import sha256
     from autoreels.orchestr.synthetic_soundtrack import TRACKS
     public = Path(__file__).resolve().parents[2] / "ui" / "public"
@@ -707,3 +715,15 @@ def test_synthetic_visual_transition_preserves_soundtrack_and_history(client,tmp
     response=put(state,plain,"dip-off")
     assert response.status_code==200,response.text
     assert response.json()["plan_sha256"]==plain["plan_sha256"]
+
+def test_longform_review_binds_exact_transcript_and_duration():
+    from autoreels.core.models import Word
+    from autoreels.orchestr.longform_review import build_review
+
+    sentence = [Word(word="Example.",t0=0.1,t1=0.5)]
+    a = build_review([sentence],1000)
+    assert a == build_review([sentence],1000)
+    assert a.review_sha256 != build_review([sentence],2000).review_sha256
+    assert a.review_sha256 != build_review([[sentence[0].model_copy(update={"t1":0.6})]],1000).review_sha256
+    with pytest.raises(ValueError):
+        build_review([sentence],400)
