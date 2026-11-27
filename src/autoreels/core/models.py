@@ -145,6 +145,19 @@ class AudioAsset(BaseModel):
     rights_note: str = Field(min_length=1, max_length=500, pattern=r"\S")
 
 
+class ImageAsset(BaseModel):
+    """Explicit local PNG reference; rights are declarations, not license verification."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    label: str = Field(min_length=1, max_length=120, pattern=r"\S")
+    format: Literal["png"] = "png"
+    width: int = Field(ge=1, le=4096)
+    height: int = Field(ge=1, le=4096)
+    rights: Literal["synthetic", "owned", "licensed", "public_domain"]
+    rights_note: str = Field(min_length=1, max_length=500, pattern=r"\S")
+
+
 class BackgroundTrack(BaseModel):
     """One optional, full-output-duration looping background audio layer."""
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
