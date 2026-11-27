@@ -295,6 +295,37 @@
         "title": "ComparisonState",
         "type": "object"
       },
+      "DurationChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "max_sec": {
+            "exclusiveMinimum": 0,
+            "title": "Max Sec",
+            "type": "integer"
+          },
+          "min_sec": {
+            "exclusiveMinimum": 0,
+            "title": "Min Sec",
+            "type": "integer"
+          },
+          "name": {
+            "enum": [
+              "shorts",
+              "reels",
+              "tiktok"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "min_sec",
+          "max_sec"
+        ],
+        "title": "DurationChoice",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -531,6 +562,260 @@
           "execution_enabled"
         ],
         "title": "PipelineSettings",
+        "type": "object"
+      },
+      "PresetLayer": {
+        "additionalProperties": false,
+        "properties": {
+          "denoise": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Denoise"
+          },
+          "duration_preset": {
+            "anyOf": [
+              {
+                "enum": [
+                  "shorts",
+                  "reels",
+                  "tiktok"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration Preset"
+          },
+          "filler_word_cut": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filler Word Cut"
+          },
+          "hook_rescue": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hook Rescue"
+          },
+          "loudnorm": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Loudnorm"
+          },
+          "two_shot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Two Shot"
+          },
+          "two_shot_auto": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Two Shot Auto"
+          },
+          "zoom": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Zoom"
+          }
+        },
+        "title": "PresetLayer",
+        "type": "object"
+      },
+      "PresetPreview": {
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/PresetValues"
+          },
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "string"
+          },
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed Fields",
+            "type": "array"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/PresetValues"
+          },
+          "execution_enabled": {
+            "title": "Execution Enabled",
+            "type": "boolean"
+          },
+          "invalidates": {
+            "items": {
+              "enum": [
+                "selection",
+                "plan",
+                "render"
+              ],
+              "type": "string"
+            },
+            "title": "Invalidates",
+            "type": "array"
+          },
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/DurationChoice"
+            },
+            "title": "Presets",
+            "type": "array"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "two_shot_auto_active": {
+            "title": "Two Shot Auto Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schema_version",
+          "base_revision",
+          "base",
+          "effective",
+          "presets",
+          "changed_fields",
+          "invalidates",
+          "two_shot_auto_active",
+          "execution_enabled"
+        ],
+        "title": "PresetPreview",
+        "type": "object"
+      },
+      "PresetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Base Revision",
+            "type": "string"
+          },
+          "clip_layer": {
+            "$ref": "#/components/schemas/PresetLayer"
+          },
+          "global_layer": {
+            "$ref": "#/components/schemas/PresetLayer"
+          },
+          "project_layer": {
+            "$ref": "#/components/schemas/PresetLayer"
+          }
+        },
+        "required": [
+          "base_revision",
+          "global_layer",
+          "project_layer",
+          "clip_layer"
+        ],
+        "title": "PresetRequest",
+        "type": "object"
+      },
+      "PresetValues": {
+        "additionalProperties": false,
+        "properties": {
+          "denoise": {
+            "title": "Denoise",
+            "type": "boolean"
+          },
+          "duration_preset": {
+            "enum": [
+              "shorts",
+              "reels",
+              "tiktok"
+            ],
+            "title": "Duration Preset",
+            "type": "string"
+          },
+          "filler_word_cut": {
+            "title": "Filler Word Cut",
+            "type": "boolean"
+          },
+          "hook_rescue": {
+            "title": "Hook Rescue",
+            "type": "boolean"
+          },
+          "loudnorm": {
+            "title": "Loudnorm",
+            "type": "boolean"
+          },
+          "two_shot": {
+            "title": "Two Shot",
+            "type": "boolean"
+          },
+          "two_shot_auto": {
+            "title": "Two Shot Auto",
+            "type": "boolean"
+          },
+          "zoom": {
+            "title": "Zoom",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "duration_preset",
+          "hook_rescue",
+          "filler_word_cut",
+          "zoom",
+          "loudnorm",
+          "denoise",
+          "two_shot",
+          "two_shot_auto"
+        ],
+        "title": "PresetValues",
         "type": "object"
       },
       "ProjectItem": {
@@ -1547,6 +1832,60 @@
           }
         },
         "summary": "Configured Settings"
+      }
+    },
+    "/api/preset-preview": {
+      "get": {
+        "operationId": "preset_defaults_api_preset_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Preset Defaults"
+      },
+      "put": {
+        "operationId": "preview_preset_api_preset_preview_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Preset"
       }
     },
     "/api/projects": {

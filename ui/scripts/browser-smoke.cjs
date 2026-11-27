@@ -79,6 +79,15 @@ async function mock(page, mode = "normal") {
       }
       return route.fulfill({status:200,contentType:"video/mp4",body:fixture,headers:{"Accept-Ranges":"bytes"}});
     }
+    if (path === "/api/preset-preview") {
+      const base = {duration_preset:"shorts",hook_rescue:false,filler_word_cut:true,zoom:false,loudnorm:true,denoise:false,two_shot:false,two_shot_auto:false};
+      const input = method==="PUT" ? route.request().postDataJSON() : null;
+      const effective = {...base,...(input?.global_layer||{}),...(input?.project_layer||{}),...(input?.clip_layer||{})};
+      const changed_fields = Object.keys(base).filter(k=>base[k]!==effective[k]);
+      return route.fulfill({json:{schema_version:1,base_revision:"a".repeat(64),base,effective,
+        presets:[{name:"shorts",min_sec:15,max_sec:90},{name:"tiktok",min_sec:15,max_sec:180}],
+        changed_fields,invalidates:changed_fields.length?["render"]:[],two_shot_auto_active:effective.two_shot&&effective.two_shot_auto,execution_enabled:false}});
+    }
     if (path === "/api/pipeline-settings") {
       const clips=url.searchParams.get("clips"), profile=url.searchParams.get("profile");
       return route.fulfill({json:{schema_version:1,analysis_status:"configured",render_status:"configured",
@@ -138,7 +147,17 @@ async function main() {
           assert.equal(previewUrl.searchParams.get("clips"),"7");
           assert.equal(previewUrl.searchParams.get("profile"),"hevc");
           await page.getByText("Пробные параметры допустимы. Ничего не сохранено.",{exact:true}).waitFor();
+          await page.getByLabel("Автоматический зум").selectOption("on");
+          await page.getByLabel("Уровень пробных настроек").selectOption("clip_layer");
+          await page.getByLabel("Автоматический зум").selectOption("off");
+          const presetRequest=page.waitForRequest(req=>req.url().includes("/api/preset-preview")&&req.method()==="PUT");
+          await page.getByRole("button",{name:"Сравнить пресет",exact:true}).click();
+          const presetBody=(await presetRequest).postDataJSON();
+          assert.equal(presetBody.global_layer.zoom,true);
+          assert.equal(presetBody.clip_layer.zoom,false);
+          await page.getByText("Изменений нет.",{exact:true}).waitFor();
           await layout(page,"390 render modes/settings");
+          console.log("PASS preset scope override false and no-change preview");
           console.log("PASS read-only configured settings and typed override preview");
           await page.getByRole("button",{name:"Проекты",exact:true}).click();
           await page.locator(".source-row").first().waitFor();

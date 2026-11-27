@@ -137,3 +137,38 @@ def pipeline_settings(root, clips=None, profile=None):
         preview_status=("valid" if valid else "blocked") if requested else "not_requested",
         execution_enabled=False,
     )
+
+
+def preset_preview(root, request=None):
+    """Read the real CLI config; return only a restricted preview projection."""
+    from autoreels.core.config import ConfigError, load_r0_config, load_render_config
+    from . import pipeline_settings as view
+    from . import preset_preview as presets
+
+    folder = root / "config"
+    r0 = folder / "r0.yaml"
+    render_file = folder / "render.yaml"
+    local = folder / "render.local.yaml"
+    if (view._file_status(root, r0) != "configured"
+            or view._file_status(root, render_file) != "configured"
+            or view._file_status(root, local) not in ("configured", "missing")):
+        raise ValueError("configured presets unavailable")
+    try:
+        analysis = load_r0_config(r0)
+        render = load_render_config(render_file, local_path=local)
+        values = presets.PresetValues(
+            duration_preset=analysis.duration_preset,
+            hook_rescue=analysis.autocut.hook_clauses_autocut,
+            filler_word_cut=analysis.filler_word_cut,
+            zoom=render.zoom.enabled,
+            loudnorm=render.audio_processing.loudnorm_enabled,
+            denoise=render.audio_processing.denoise_enabled,
+            two_shot=render.two_shot,
+            two_shot_auto=render.two_shot_auto,
+        )
+        choices = [presets.DurationChoice(name=name, min_sec=analysis.presets[name].min,
+                                         max_sec=analysis.presets[name].max)
+                   for name in ("shorts", "reels", "tiktok") if name in analysis.presets]
+    except (ConfigError, OSError, ValueError):
+        raise ValueError("configured presets invalid") from None
+    return presets.preview(values, choices, request)
