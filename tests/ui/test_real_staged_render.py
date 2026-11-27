@@ -408,7 +408,7 @@ def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
 @pytest.mark.parametrize("dip", [None, 200])
 def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
     import numpy as np
-    from autoreels.core.models import AudioAsset, BackgroundTrack, Segment
+    from autoreels.core.models import AudioAsset, BackgroundTrack, GraphicLayer, Segment
     from autoreels.core.config import load_render_config
     from autoreels.local.assets import resolve_audio_asset
     from autoreels.local.render import render_crop
@@ -435,12 +435,22 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
     wav.rename(path)
     assert resolve_audio_asset(assets,asset)==path
     track=BackgroundTrack(asset=asset,volume=0.25,fade_seconds=0.0,ducking=False,final_normalize=False)
+    graphic = GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
+                           start_ms=1000,end_ms=2000,color="white") if dip else None
     reel=Reel(id="r01",start=0,end=5,score=80,hook="",title="",description="",
               planned=True,segments=[Segment(start=0,end=2),Segment(start=3,end=5)],
-              window_rates=[0.5,2.0],background_track=track,seam_dip_ms=dip)
+              window_rates=[0.5,2.0],background_track=track,seam_dip_ms=dip,graphic_layer=graphic)
     manifest=Manifest(source=source.name,source_sha256=sha(source),duration_preset="shorts",run_key="music-fixture",
         setup=SetupProfile(setup_id="synthetic",crop=Crop(x=0,y=0,w=96,h=160),
                            frame=[96,160],scale=[360,640]),reels=[reel])
+    if graphic:
+        from autoreels.__main__ import _reel_render_fingerprint
+        def fingerprint(r):
+            return _reel_render_fingerprint(r,setup=manifest.setup,palette="neutral",
+                                            profile="h264",zoom_on=False,music_path=None)
+        assert fingerprint(reel)!=fingerprint(reel.model_copy(update={"graphic_layer":None}))
+        assert fingerprint(reel)!=fingerprint(reel.model_copy(
+            update={"graphic_layer":graphic.model_copy(update={"start_ms":1100})}))
     plan=tmp_path/"reviews/DEMO.review.json"
     plan.write_text(manifest.model_dump_json())
     bound=staged_executor.bind(tmp_path,job_id="music",target_id="local",stem="DEMO",clip="r01",gate="ui-ffmpeg")
@@ -468,6 +478,16 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
                 return float(np.frombuffer(frame,dtype=np.uint8).mean())
             assert brightness(3.5)>35 and brightness(4.5)>35
             assert brightness(4.0)<25
+        if graphic:
+            def white_share(t):
+                frame=run("-v","error","-ss",str(t),"-i",output,"-frames:v","1",
+                          "-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
+                rgb=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)
+                # Inner rectangle, away from chroma interpolation at its edges.
+                patch=rgb[72:184,42:102]
+                return float(np.all(patch>230,axis=2).mean())
+            assert white_share(1.5)>0.95
+            assert white_share(0.5)<0.5 and white_share(2.5)<0.5
         observed["sha"]=sha(output)
     with closing(sqlite3.connect(tmp_path/"music-jobs.sqlite")) as db:
         ledger=execution.Ledger(db)

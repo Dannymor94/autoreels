@@ -155,6 +155,26 @@ class BackgroundTrack(BaseModel):
     final_normalize: bool = True
 
 
+class GraphicLayer(BaseModel):
+    """One solid rectangle in final-frame percentages and output milliseconds."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    x_pct: int = Field(ge=0, lt=100)
+    y_pct: int = Field(ge=0, lt=100)
+    width_pct: int = Field(gt=0, le=100)
+    height_pct: int = Field(gt=0, le=100)
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(gt=0)
+    color: Literal["white", "black", "red", "blue"]
+
+    @model_validator(mode="after")
+    def _bounds(self):
+        if (self.x_pct + self.width_pct > 100 or self.y_pct + self.height_pct > 100
+                or self.end_ms <= self.start_ms):
+            raise ValueError("invalid graphic rectangle or interval")
+        return self
+
+
 class Reel(BaseModel):
     """Один кандидат-клип. Без crop/scale — наследует их из `manifest.setup`."""
 
@@ -258,6 +278,7 @@ class Reel(BaseModel):
     background_track: BackgroundTrack | None = None
     # Visual-only dip at internal hard cuts, milliseconds on each side.
     seam_dip_ms: Literal[100, 200, 300] | None = None
+    graphic_layer: GraphicLayer | None = None
 
     @model_serializer(mode="wrap")
     def _serialize_rates(self, handler):
@@ -268,12 +289,15 @@ class Reel(BaseModel):
             data.pop("background_track", None)
         if self.seam_dip_ms is None:
             data.pop("seam_dip_ms", None)
+        if self.graphic_layer is None:
+            data.pop("graphic_layer", None)
         return data
 
     @model_validator(mode="after")
     def _validate_rates(self):
         self.check_window_rates()
         self.check_seam_dip()
+        self.check_graphic_layer()
         return self
 
     def check_window_rates(self) -> None:
@@ -305,6 +329,22 @@ class Reel(BaseModel):
         for w in timing:
             if w.output_end - w.output_start <= 2 * self.seam_dip_ms / 1000:
                 raise ValueError("window too short for seam dip")
+
+    def check_graphic_layer(self) -> None:
+        if self.graphic_layer is None:
+            return
+        from autoreels.core.playback_timing import build_window_timing
+        layer = GraphicLayer.model_validate_json(self.graphic_layer.model_dump_json())
+        windows = self.playback_windows()
+        if (not self.planned or self.speed != 1.0 or self.cold_open is not None
+                or self.beat_gap_sec is not None or self.montage or self.fx
+                or self.zoom_source_t0 is not None or self.c_close_ranges
+                or self.title_overlay or self.open_thought
+                or any(s.window_cut or s.close_intervals or s.prerolled for s in windows)):
+            raise ValueError("graphic layer requires a simple planned hard-cut body")
+        timing = build_window_timing(windows, self.window_rates or [1.0] * len(windows))
+        if layer.end_ms / 1000 > timing[-1].output_end + 1e-9:
+            raise ValueError("graphic layer extends beyond montage duration")
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.
@@ -345,6 +385,7 @@ class Reel(BaseModel):
         """
         self.check_window_rates()
         self.check_seam_dip()
+        self.check_graphic_layer()
         if self.cold_open is not None and self.cold_open.end <= self.cold_open.start:
             raise ValueError(f"reel {self.id}: cold_open is empty/reversed "
                              f"[{self.cold_open.start:.3f}, {self.cold_open.end:.3f}]")

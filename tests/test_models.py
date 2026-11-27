@@ -188,3 +188,25 @@ def test_window_rates_manifest_opt_in_and_legacy_serialization():
             Reel.model_validate({**legacy.model_dump(),**changes})
     with pytest.raises(ValueError):
         rated.model_copy(update={"segments":[Segment(start=0,end=1),Segment(start=1,end=2)]}).check_segments()
+
+def test_graphic_layer_optional_and_bound_to_output_duration():
+    import pytest
+    from autoreels.core.models import GraphicLayer, Segment
+
+    base = Reel(id="r01",start=0,end=5,score=80,hook="",title="",description="",
+                planned=True,segments=[Segment(start=0,end=2),Segment(start=3,end=5)],
+                window_rates=[0.5,2.0])
+    assert "graphic_layer" not in base.model_dump()
+    spec = dict(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
+                start_ms=1000,end_ms=4500,color="white")
+    layer = GraphicLayer(**spec)
+    reel = Reel.model_validate({**base.model_dump(),"graphic_layer":layer})
+    assert Reel.model_validate_json(reel.model_dump_json()) == reel
+    for changes in ({"x_pct":90},{"start_ms":4500},{"end_ms":5001},
+                    {"color":"white;null"},{"width_pct":True}):
+        with pytest.raises(ValueError):
+            Reel.model_validate({**base.model_dump(),"graphic_layer":{**spec,**changes}})
+    with pytest.raises(ValueError):
+        Reel.model_validate({**base.model_dump(),"graphic_layer":spec,"planned":False})
+    with pytest.raises(ValueError):
+        reel.model_copy(update={"graphic_layer":layer.model_copy(update={"end_ms":5001})}).check_segments()
