@@ -105,6 +105,20 @@ def expire(job: Job, now: int) -> Job:
     return _change(job, status="reconcile", expires_ms=None)
 
 
+def abandon(job: Job) -> Job:
+    """Fence an interrupted attempt when its coordinator loses ownership.
+
+    Trusted recovery caller only. No clock comparison: persisted monotonic
+    deadlines may belong to a prior boot. Keep the reservation, worker ID,
+    attempt fence and cancellation intent. This is NOT proof of child exit.
+    """
+    if job.status == "reconcile":
+        return job
+    if job.status not in ("running", "cancelling"):
+        raise Conflict("job is not an interrupted attempt")
+    return _change(job, status="reconcile", expires_ms=None)
+
+
 def finish(job: Job, worker_id: str, fence: int, now: int,
            outcome: Literal["success", "empty", "failed", "cancelled"],
            artifact_sha256: str | None = None) -> Job:
@@ -207,7 +221,7 @@ class Ledger:
 
     def apply(self, job_id: str, revision: int, transition, *args, **kwargs) -> Job:
         # Internal trusted transition functions only, never dispatch a client string.
-        if transition not in (claim, renew, cancel, expire, finish, reconcile_stopped, reconcile_artifact):
+        if transition not in (claim, renew, cancel, expire, abandon, finish, reconcile_stopped, reconcile_artifact):
             raise ValueError("unknown transition")
         with self._tx():
             current = self.get(job_id)

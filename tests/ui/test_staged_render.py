@@ -269,3 +269,62 @@ def test_bound_executor_does_not_accept_cancelled_or_expired_result(tmp_path, ca
         assert j.status == ("cancelled" if cancel else "reconcile")
         assert j.artifact_sha256 is None
         assert (tmp_path / "reels-out/DEMO/_gate/ui-final/r01.mp4").is_file()
+
+
+
+def test_restart_quarantines_after_actual_controller_crash(tmp_path):
+    pytest.importorskip("fcntl")
+    import sqlite3
+    import subprocess
+    import sys
+    from contextlib import closing
+    from autoreels.orchestr import execution, staged_executor
+
+    source, plan = stage(tmp_path)
+    bound = staged_executor.bind(tmp_path, job_id="crash", target_id="local",
+                                 stem="DEMO", clip="r01", gate="ui-crash")
+    db = tmp_path / "crash.sqlite"
+    with closing(sqlite3.connect(db)) as c:
+        queued = execution.Ledger(c).submit(bound.request)
+    # A real child controller exits without finally handlers after claiming.
+    # An interrupted output is deliberately left in the gate. No owner media.
+    code = """
+import os, sqlite3, sys
+from pathlib import Path
+from autoreels.orchestr import execution, staged_executor
+root = Path(sys.argv[1])
+ledger = execution.Ledger(sqlite3.connect(root / "crash.sqlite"))
+with staged_executor.fixture_lock(root):
+    j = ledger.get("crash")
+    ledger.apply("crash", j.revision, execution.claim, "local", "old-worker", 900000, 60000)
+    out = root / "reels-out/DEMO/_gate/ui-crash/r01.mp4"
+    out.parent.mkdir(parents=True)
+    out.write_bytes(b"partial-output")
+    os._exit(37)
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path)],
+                            check=False, timeout=10)
+    assert result.returncode == 37
+    # Config/source drift must not make the recovery itself fail.
+    (tmp_path / "config/render.local.yaml").write_text("role: both\n")
+    partial = tmp_path / "reels-out/DEMO/_gate/ui-crash/r01.mp4"
+    with closing(sqlite3.connect(db)) as c:
+        ledger = execution.Ledger(c)
+        interrupted = ledger.get("crash")
+        assert interrupted.status == "running" and interrupted.revision > queued.revision
+        with staged_executor.fixture_lock(tmp_path):
+            with pytest.raises(execution.Conflict, match="busy"):
+                staged_executor.recover_interrupted(ledger, bound)
+        recovered = staged_executor.recover_interrupted(ledger, bound)
+        assert recovered.status == "reconcile"
+        assert recovered.request == bound.request and recovered.fence == interrupted.fence
+        assert recovered.artifact_sha256 is None
+        assert staged_executor.recover_interrupted(ledger, bound) == recovered
+        with pytest.raises(execution.Conflict, match="reserved"):
+            ledger.submit(bound.request.model_copy(update={"job_id":"duplicate"}))
+        with pytest.raises(execution.Conflict):
+            ledger.apply("crash", recovered.revision, execution.finish,
+                         "old-worker", recovered.fence, 1, "success", "d"*64)
+    assert partial.read_bytes() == b"partial-output"
+    assert source.read_bytes() == b"synthetic-source"
+    assert plan.is_file()

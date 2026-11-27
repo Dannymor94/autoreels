@@ -228,3 +228,28 @@ def run_supervised_bound(
                 raise
             return ledger.apply(current.request.job_id, current.revision, execution.finish,
                                 worker_id, current.fence, now, "cancelled")
+
+
+
+def recover_interrupted(ledger: execution.Ledger, bound: BoundStaged) -> execution.Job:
+    """Quarantine the exact interrupted fixture after controller restart.
+
+    Only the trusted coordinator calls this while holding the same fixture
+    lock. No process enumeration, stored PID signal, clock comparison,
+    artifact acceptance, deletion or retry. A free controller lock is not
+    proof that an orphaned render child or decoder has exited.
+
+    Recovery intentionally checks the persisted request rather than rebinding
+    current files: changed/missing input or config must not prevent quarantine.
+    """
+    if (not bound.root.is_absolute() or not bound.root.is_dir()
+            or bound.root != bound.root.resolve()):
+        raise ValueError("canonical isolated root required")
+    with fixture_lock(bound.root):
+        current = ledger.get(bound.request.job_id)
+        if current.request != bound.request:
+            raise execution.Conflict("staged request mismatch")
+        if current.status in ("running", "cancelling"):
+            return ledger.apply(current.request.job_id, current.revision, execution.abandon)
+        # Queued, terminal, or already quarantined: do not modify.
+        return current
