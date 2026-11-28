@@ -1119,6 +1119,93 @@
         "title": "DemoWord",
         "type": "object"
       },
+      "ExportCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "plan_sha256": {
+            "title": "Plan Sha256",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "plan_sha256"
+        ],
+        "title": "ExportCommand",
+        "type": "object"
+      },
+      "ExportView": {
+        "properties": {
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Sha256"
+          },
+          "editor_plan_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editor Plan Sha256"
+          },
+          "editor_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editor Revision"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "disabled",
+              "ready",
+              "reserved",
+              "queued",
+              "running",
+              "cancelling",
+              "reconcile",
+              "success",
+              "empty",
+              "failed",
+              "cancelled",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "status",
+          "editor_revision",
+          "editor_plan_sha256",
+          "artifact_sha256"
+        ],
+        "title": "ExportView",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3493,6 +3580,76 @@
           }
         },
         "summary": "Synthetic Whole Command"
+      }
+    },
+    "/api/synthetic-whole-export": {
+      "get": {
+        "operationId": "synthetic_whole_export_view_api_synthetic_whole_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Synthetic Whole Export View"
+      },
+      "put": {
+        "operationId": "synthetic_whole_export_command_api_synthetic_whole_export_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthetic Whole Export Command"
+      }
+    },
+    "/api/synthetic-whole-export/media": {
+      "get": {
+        "operationId": "synthetic_whole_export_media_api_synthetic_whole_export_media_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Synthetic Whole Export Media"
       }
     },
     "/api/thumb/{stem}/{clip}": {
