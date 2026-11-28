@@ -268,3 +268,54 @@ def test_graphic_layer_stack_is_ordered_exclusive_and_bounded():
             Reel.model_validate({**base.model_dump(),"graphic_layers":layers})
     with pytest.raises(ValueError):
         Reel.model_validate({**base.model_dump(),"graphic_layer":first,"graphic_layers":[second]})
+
+
+def test_local_synthetic_asset_library_explicit_import(tmp_path):
+    import hashlib
+    import struct
+    import wave
+    import zlib
+    import pytest
+    from autoreels.core.models import AudioAsset, ImageAsset
+    from autoreels.local.asset_library import import_asset, list_assets
+    root=tmp_path/"library"
+    root.mkdir()
+    wav=tmp_path/"selected.wav"
+    with wave.open(str(wav),"wb") as stream:
+        stream.setparams((1,2,48000,0,"NONE","not compressed"))
+        stream.writeframes(b"\x00\x00"*480)
+    def digest(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    audio=AudioAsset(sha256=digest(wav),label="Generated silence",rights="synthetic",rights_note="test fixture")
+    assert list_assets(root)==()
+    assert import_asset(root,wav,audio)==audio
+    assert import_asset(root,wav,audio)==audio
+    assert digest(wav)==audio.sha256
+    assert (root/(audio.sha256+".wav")).read_bytes()==wav.read_bytes()
+    with pytest.raises(ValueError):
+        import_asset(root,wav,audio.model_copy(update={"label":"different metadata"}))
+    with pytest.raises(ValueError):
+        import_asset(root,wav,audio.model_copy(update={"rights":"owned"}))
+    def chunk(tag,data):
+        return struct.pack(">I",len(data))+tag+data+struct.pack(">I",zlib.crc32(tag+data))
+    png=tmp_path/"selected.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",1,1,8,2,0,0,0))
+                    +chunk(b"IDAT",zlib.compress(b"\x00\xff\x00\x00"))+chunk(b"IEND",b""))
+    image=ImageAsset(sha256=digest(png),label="Generated still",width=1,height=1,
+                     rights="synthetic",rights_note="test fixture")
+    with pytest.raises(ValueError):
+        import_asset(root,png,image.model_copy(update={"width":2}))
+    assert list_assets(root)==(audio,)
+    alias=tmp_path/"alias.png"
+    alias.symlink_to(png)
+    with pytest.raises(ValueError):
+        import_asset(root,alias,image)
+    # Recover interrupted registration of complete verified bytes.
+    (root/(image.sha256+".png")).write_bytes(png.read_bytes())
+    assert list_assets(root)==(audio,)
+    assert import_asset(root,png,image)==image
+    assert list_assets(root)==tuple(sorted((audio,image),key=lambda a:(a.sha256,a.format)))
+    (root/(image.sha256+".png")).write_bytes(b"changed")
+    with pytest.raises(ValueError):
+        list_assets(root)
+    assert not list(root.glob(".intake-*"))
