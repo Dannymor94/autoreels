@@ -261,7 +261,7 @@ export function SyntheticCutPreview() {
     if(next)changePlan(next);
   }
   const graphicNames=(code:number[]|null|undefined)=>!code?"Без графики":
-    (code[6]===4?"Тестовый B-roll":code[6]===3?"Тестовое изображение":code[6]===1?"Белый":"Синий")+" · "+(code[0]===70?"справа":"слева")+" · "+seconds(code[4]/1000)+" – "+seconds(code[5]/1000);
+    (code[6]===4?"Тестовый B-roll":code[6]===3?"Тестовое изображение":code[6]===1?"Белый":"Синий")+" · "+code[0]+"%, "+code[1]+"% · "+code[2]+"×"+code[3]+"% · "+seconds(code[4]/1000)+" – "+seconds(code[5]/1000);
   const dip=plan.dip_ms??0;
   const opacity=dip?Math.max(0,...plan.windows.slice(0,-1).map(w=>1-Math.abs(position-w.output_end)/(dip/1000))):0;
   const music=plan.music;
