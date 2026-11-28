@@ -1,0 +1,3 @@
+# UI-602B — explicit acceptance of grounded synthetic insert proposals
+
+Fixed demonstration suggestions (photo for sentence 1, video for sentence 3), not LLM output. Generate the same synthetic speech evidence as the existing cut fixture, validate each alternative against the exact saved Manifest, existing layers and output timing. Read-only catalog projection. The user explicitly accepts one suggestion through the existing exact candidate preview/CAS commit; stale revisions rejected. No automatic application, paid API, real media, new HTTP route, deployment or new dependencies. Existing API schema and focused regression verify no read-time writes, accepted insertion and stale rejection. Depends on UI-503D. Exact-head CI.

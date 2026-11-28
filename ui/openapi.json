@@ -520,6 +520,13 @@
             "title": "History",
             "type": "array"
           },
+          "insert_options": {
+            "items": {
+              "$ref": "#/components/schemas/CutInsertOption"
+            },
+            "title": "Insert Options",
+            "type": "array"
+          },
           "longform_review": {
             "anyOf": [
               {
@@ -583,9 +590,46 @@
           "history",
           "soundtracks",
           "visual_assets",
+          "insert_options",
           "longform_review"
         ],
         "title": "CutDemoView",
+        "type": "object"
+      },
+      "CutInsertOption": {
+        "properties": {
+          "asset_number": {
+            "title": "Asset Number",
+            "type": "integer"
+          },
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "graphic": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Graphic",
+            "type": "array"
+          },
+          "sentence": {
+            "title": "Sentence",
+            "type": "integer"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sentence",
+          "asset_number",
+          "start_ms",
+          "end_ms",
+          "graphic"
+        ],
+        "title": "CutInsertOption",
         "type": "object"
       },
       "CutPreview": {
