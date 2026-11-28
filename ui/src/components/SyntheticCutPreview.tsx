@@ -230,7 +230,7 @@ export function SyntheticCutPreview() {
     equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[])&&equal(p.crop??[],plan.crop??[])&&equal(p.music??[],plan.music??[]));
   const graphic=plan.graphic;
   const graphicNames=(code:number[]|null|undefined)=>!code?"Без графики":
-    (code[6]===1?"Белый":"Синий")+" · "+(code[0]===70?"справа":"слева")+" · "+seconds(code[4]/1000)+" – "+seconds(code[5]/1000);
+    (code[6]===3?"Тестовое изображение":code[6]===1?"Белый":"Синий")+" · "+(code[0]===70?"справа":"слева")+" · "+seconds(code[4]/1000)+" – "+seconds(code[5]/1000);
   const dip=plan.dip_ms??0;
   const opacity=dip?Math.max(0,...plan.windows.slice(0,-1).map(w=>1-Math.abs(position-w.output_end)/(dip/1000))):0;
   const music=plan.music;
@@ -301,7 +301,9 @@ export function SyntheticCutPreview() {
         onError={()=>{stopMusic();setError(true);setPlaying(false);}} />
       {dip>0&&<div className="cut-dip-overlay" aria-hidden="true" style={{opacity}}/>}
       {graphic&&position>=graphic[4]/1000&&position<graphic[5]/1000&&<div className="cut-graphic-overlay" aria-hidden="true"
-        style={{position:"absolute",left:graphic[0]+"%",top:graphic[1]+"%",width:graphic[2]+"%",height:graphic[3]+"%",background:graphic[6]===1?"white":"blue",pointerEvents:"none"}}/>}
+        style={{position:"absolute",left:graphic[0]+"%",top:graphic[1]+"%",width:graphic[2]+"%",height:graphic[3]+"%",background:graphic[6]===3?"black":graphic[6]===1?"white":"blue",pointerEvents:"none"}}>
+        {graphic[6]===3&&<img src="/synthetic-graphic-image.png" alt="" style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>}
+      </div>}
       {!error&&<div className="synthetic-preview-cue">{cue?.text??""}</div>}
     </div>
     <h3>Кадрирование</h3>

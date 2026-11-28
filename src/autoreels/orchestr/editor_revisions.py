@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from autoreels.core.models import Crop, GraphicLayer, Manifest
 from .synthetic_soundtrack import soundtrack
+from .synthetic_image import IMAGE
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 OpaqueId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
@@ -59,6 +60,7 @@ FIXTURE_GRAPHICS = (
     (70, 10, 20, 20, 0, 500, 1),
     (10, 10, 20, 20, 500, 1000, 1),
     (10, 10, 20, 20, 0, 1000, 2),
+    (10, 10, 25, 25, 0, 500, 3),
 )
 
 
@@ -69,7 +71,8 @@ def graphic_for(code):
         raise Conflict("invalid fixture graphic")
     x, y, w, h, start, end, color = code
     return GraphicLayer(x_pct=x, y_pct=y, width_pct=w, height_pct=h,
-                        start_ms=start, end_ms=end, color={1:"white",2:"blue"}[color])
+                        start_ms=start, end_ms=end, color={1:"white",2:"blue"}.get(color),
+                        image=IMAGE if color==3 else None)
 
 
 class FixtureSelection(BaseModel):
