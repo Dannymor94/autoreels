@@ -4722,7 +4722,7 @@ def cmd_render(
             zoom_on = render_cfg.zoom.enabled if zoom is None else zoom
             # Explicit layer must be available even when a prior artifact is
             # eligible for reuse. Never substitute a random or missing track.
-            from autoreels.local.assets import resolve_audio_asset, resolve_image_asset
+            from autoreels.local.assets import resolve_audio_asset, resolve_image_asset, resolve_video_asset
             for r in manifest.reels:
                 if r.background_track is not None:
                     resolve_audio_asset(Path(root).resolve() / "assets", r.background_track.asset)
@@ -4730,6 +4730,8 @@ def cmd_render(
                     if r.graphic_layer.image.rights != "synthetic":
                         raise ValueError("image layer requires an explicitly staged synthetic asset")
                     resolve_image_asset(Path(root).resolve() / "assets", r.graphic_layer.image)
+                if r.graphic_layer is not None and r.graphic_layer.video is not None:
+                    resolve_video_asset(Path(root).resolve() / "assets", r.graphic_layer.video)
 
             # Отпечаток определения рила (окна, скорость, заголовок, cold open, кроп, палитра,
             # профиль…). Клип с несовпавшим отпечатком перерендеривается, даже если файл на месте —
@@ -4819,7 +4821,8 @@ def cmd_render(
                 **({"_allow_short_synthetic": True} if _allow_short_synthetic else {}),
                 **({"assets_dir": Path(root).resolve() / "assets"}
                    if any(r.background_track is not None or
-                          (r.graphic_layer is not None and r.graphic_layer.image is not None)
+                          (r.graphic_layer is not None and
+                           (r.graphic_layer.image is not None or r.graphic_layer.video is not None))
                           for r in render_manifest.reels) else {}),
             )
             all_outputs.extend(outputs)

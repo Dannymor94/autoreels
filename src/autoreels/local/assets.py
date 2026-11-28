@@ -13,10 +13,11 @@ import struct
 import zlib
 from pathlib import Path
 
-from autoreels.core.models import AudioAsset, ImageAsset
+from autoreels.core.models import AudioAsset, ImageAsset, VideoAsset
 
 MAX_AUDIO_BYTES = 128 * 1024 * 1024
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
+MAX_VIDEO_BYTES = 64 * 1024 * 1024
 
 
 def resolve_audio_asset(root: Path, asset: AudioAsset) -> Path:
@@ -35,6 +36,12 @@ def resolve_image_asset(root: Path, asset: ImageAsset) -> Path:
     return _resolve_asset(root, asset, MAX_IMAGE_BYTES, "image")
 
 
+def resolve_video_asset(root: Path, asset: VideoAsset) -> Path:
+    """Resolve the exact bytes; the trusted renderer separately checks codec and frames."""
+    asset = VideoAsset.model_validate_json(asset.model_dump_json())
+    return _resolve_asset(root, asset, MAX_VIDEO_BYTES, "video")
+
+
 def _check_png_header(header: bytes, asset: ImageAsset) -> None:
     if (len(header) != 33 or header[:8] != b"\x89PNG\r\n\x1a\n"
             or header[8:16] != b"\x00\x00\x00\x0dIHDR"):
@@ -46,7 +53,7 @@ def _check_png_header(header: bytes, asset: ImageAsset) -> None:
         raise ValueError("local image PNG dimensions or header mismatch")
 
 
-def _resolve_asset(root: Path, asset: AudioAsset | ImageAsset, limit: int, kind: str) -> Path:
+def _resolve_asset(root: Path, asset: AudioAsset | ImageAsset | VideoAsset, limit: int, kind: str) -> Path:
     root = Path(root)
     if not root.is_absolute() or not root.is_dir() or root.resolve() != root:
         raise ValueError("canonical local asset directory required")

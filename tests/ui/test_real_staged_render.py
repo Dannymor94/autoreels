@@ -405,10 +405,10 @@ def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
     assert base.setup.crop.model_dump()==dict(x=0,y=0,w=96,h=160)
 
 
-@pytest.mark.parametrize("dip,with_image", [(None,False),(200,False),(200,True)])
-def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, with_image):
+@pytest.mark.parametrize("dip,kind", [(None,"none"),(200,"solid"),(200,"image"),(200,"video")])
+def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, kind):
     import numpy as np
-    from autoreels.core.models import AudioAsset, BackgroundTrack, GraphicLayer, ImageAsset, Segment
+    from autoreels.core.models import AudioAsset, BackgroundTrack, GraphicLayer, ImageAsset, Segment, VideoAsset
     from autoreels.core.config import load_render_config
     from autoreels.local.assets import resolve_audio_asset
     from autoreels.local.render import render_crop
@@ -435,8 +435,8 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
     wav.rename(path)
     assert resolve_audio_asset(assets,asset)==path
     track=BackgroundTrack(asset=asset,volume=0.25,fade_seconds=0.0,ducking=False,final_normalize=False)
-    image = None
-    if with_image:
+    image = video = None
+    if kind == "image":
         png = assets/"test.png"
         run("-v","error","-f","lavfi","-i","color=red:s=36x64",
             "-vf","drawbox=x=18:y=0:w=18:h=64:color=blue:t=fill",
@@ -445,9 +445,22 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
                            rights="synthetic",rights_note="generated in CI")
         image_path = assets/(image.sha256+".png")
         png.rename(image_path)
+    if kind == "video":
+        clip = assets/"test.mp4"
+        run("-v","error","-f","lavfi","-i","color=red:s=36x64:r=30:d=0.5",
+            "-f","lavfi","-i","color=blue:s=36x64:r=30:d=0.5",
+            "-filter_complex","[0:v][1:v]concat=n=2:v=1:a=0[v]","-map","[v]",
+            "-c:v","libx264","-threads","2","-pix_fmt","yuv420p",clip)
+        video=VideoAsset(sha256=sha(clip),label="Two color video",width=36,height=64,
+                         duration_ms=1000,rights="synthetic",rights_note="generated in CI")
+        video_path=assets/(video.sha256+".mp4")
+        clip.rename(video_path)
+        with pytest.raises(ValueError):
+            GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
+                         start_ms=1000,end_ms=2100,video=video)
     graphic = GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
-                           start_ms=1000,end_ms=2000,color=None if image else "white",
-                           image=image) if dip else None
+                           start_ms=1000,end_ms=2000,color=None if image or video else "white",
+                           image=image,video=video) if dip else None
     if image:
         with pytest.raises(ValueError):
             GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
@@ -478,7 +491,7 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
         assert abs(float(a["duration"])-float(v["duration"]))<=0.05
         pcm=np.frombuffer(run("-v","error","-i",output,"-map","0:a:0","-ac","1","-ar","48000",
                               "-f","s16le","-"),dtype="<i2").astype(float)
-        for t in (0.5,2.5,4.4):
+        for t in (0.5,1.2,1.7,2.5,4.4):
             chunk=pcm[round(t*48000):round(t*48000)+4800]
             assert len(chunk)==4800
             spec=np.abs(np.fft.rfft(chunk*np.hanning(4800)))**2
@@ -504,10 +517,18 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
                     right=rgb[72:184,80:102].astype(float)
                     return min(float((left[:,:,0]-left[:,:,2]>120).mean()),
                                float((right[:,:,2]-right[:,:,0]>120).mean()))
-                patch=rgb[72:184,42:102]
+                patch=rgb[72:184,42:102].astype(float)
+                if video:
+                    return (float((patch[:,:,0]-patch[:,:,2]>120).mean()),
+                            float((patch[:,:,2]-patch[:,:,0]>120).mean()))
                 return float(np.all(patch>230,axis=2).mean())
-            assert white_share(1.5)>0.95
-            assert white_share(0.5)<0.5 and white_share(2.5)<0.5
+            if video:
+                assert white_share(1.2)[0]>0.95
+                assert white_share(1.7)[1]>0.95
+                assert max(white_share(0.5))<0.9 and max(white_share(2.5))<0.9
+            else:
+                assert white_share(1.5)>0.95
+                assert white_share(0.5)<0.5 and white_share(2.5)<0.5
         observed["sha"]=sha(output)
     with closing(sqlite3.connect(tmp_path/"music-jobs.sqlite")) as db:
         ledger=execution.Ledger(db)
@@ -523,6 +544,12 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
         with pytest.raises(ValueError):
             staged_executor.bind(tmp_path,job_id="music",target_id="local",stem="DEMO",clip="r01",gate="ui-ffmpeg")
         image_path.write_bytes(original_image)
+    if video:
+        original_video=video_path.read_bytes()
+        video_path.write_bytes(original_video+b"changed")
+        with pytest.raises(ValueError):
+            staged_executor.bind(tmp_path,job_id="music",target_id="local",stem="DEMO",clip="r01",gate="ui-ffmpeg")
+        video_path.write_bytes(original_video)
     old=path.read_bytes()
     path.write_bytes(old+b"changed")
     with pytest.raises(ValueError):
