@@ -822,3 +822,37 @@ def test_whole_source_api_explicit_selection(client,tmp_root):
     assert response.json()["current_removed"]==[2,4]
     assert client.get(path).json()==response.json()
     assert client.get("/api/synthetic-cut").json()["revision"]==0
+
+def test_custom_solid_stack_preview_save_reload_undo_redo(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    path="/api/synthetic-cut"
+    initial=client.get(path).json()
+    base=next(p for p in initial["plans"] if p["plan_sha256"]==initial["plan_sha256"])
+    code=[10,10,25,25,0,500,1,20,10,20,20,0,500,2]
+    params=dict(base_revision=0,base_plan_sha256=initial["plan_sha256"],clip_uid=initial["clip_uid"],
+                graphic=",".join(map(str,code)))
+    candidate=client.get(path+"/graphic-preview",params=params)
+    assert candidate.status_code==200,candidate.text
+    target=candidate.json()
+    assert target["graphic"]==code
+    assert client.get(path).json()==initial
+    assert not (tmp_root/".ui-synthetic-editor.sqlite3").exists()
+    mixed=[*code[:-1],3]
+    assert client.get(path+"/graphic-preview",params={**params,"graphic":",".join(map(str,mixed))}).status_code==409
+    assert client.get(path+"/graphic-preview",params={**params,"graphic":",".join(map(str,code*3))}).status_code==422
+    def choose(state,p,op,navigation=None):
+        response=client.put(path,json=dict(op_id=op,base_revision=state["revision"],
+            base_plan_sha256=state["plan_sha256"],clip_uid=state["clip_uid"],
+            candidate_plan_sha256=p["plan_sha256"],removed=p["removed"],
+            graphic=p["graphic"],navigation=navigation))
+        assert response.status_code==200,response.text
+        return response.json()
+    saved=choose(initial,target,"stack")
+    assert client.get(path).json()==saved
+    assert saved["plan_sha256"]==target["plan_sha256"]
+    restored=choose(saved,base,"stack-undo","undo")
+    assert restored["plan_sha256"]==initial["plan_sha256"]
+    redone=choose(restored,target,"stack-redo","redo")
+    assert redone["plan_sha256"]==saved["plan_sha256"]

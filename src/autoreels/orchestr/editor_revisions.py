@@ -83,6 +83,18 @@ def graphic_for(code):
         raise Conflict("invalid fixture graphic") from exc
 
 
+def graphic_fields(code):
+    """Preserve the legacy single layer; flatten only the bounded ordered stack."""
+    if code is None or len(code)==7:
+        return {"graphic_layer":graphic_for(code),"graphic_layers":None}
+    if len(code) not in (14,21,28):
+        raise Conflict("invalid fixture layer stack")
+    layers=[graphic_for(code[i:i+7]) for i in range(0,len(code),7)]
+    if any(layer.color is None for layer in layers):
+        raise Conflict("fixture stack supports solid graphics only")
+    return {"graphic_layer":None,"graphic_layers":layers}
+
+
 class FixtureSelection(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
     action: Literal["select-fixture"]
@@ -100,7 +112,7 @@ class FixtureSelection(BaseModel):
     navigation: Literal["undo", "redo"] | None = None
     music: tuple[int, int, int, int] | None = None
     dip_ms: int | None = None
-    graphic: tuple[int, int, int, int, int, int, int] | None = None
+    graphic: tuple[int, ...] | None = None
 
     @property
     def selection_key(self) -> tuple[int, ...]:
@@ -140,7 +152,7 @@ class FixtureSelection(BaseModel):
                 raise Conflict("invalid fixture transition")
             key = (*key, -5, self.dip_ms)
         if self.graphic is not None:
-            graphic_for(self.graphic)
+            graphic_fields(self.graphic)
             key = (*key, -6, *self.graphic)
         return key
 
@@ -402,7 +414,8 @@ class Store:
                 or candidate.setup != expected_setup
                 or candidate.reels[0].background_track != soundtrack(op.music)
                 or candidate.reels[0].seam_dip_ms != op.dip_ms
-                or candidate.reels[0].graphic_layer != graphic_for(op.graphic)
+                or any(getattr(candidate.reels[0],name)!=value
+                       for name,value in graphic_fields(op.graphic).items())
                 or candidate.model_copy(update={"reels":baseline.reels, "setup":baseline.setup}) != baseline):
             raise Conflict("fixture candidate outside initial manifest")
         candidate.reels[0].check_segments()

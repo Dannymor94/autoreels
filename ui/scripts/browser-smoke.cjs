@@ -66,13 +66,15 @@ async function mock(page, mode = "normal") {
       const image={...reordered,graphic:[10,10,25,25,0,500,3],plan_sha256:"3".repeat(64)};
       const broll={...reordered,graphic:[10,10,25,25,0,1000,4],plan_sha256:"2".repeat(64)};
       const custom={...broll,graphic:[23,10,25,25,0,1000,4],plan_sha256:"1".repeat(64)};
-      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image,broll,custom];
+      const stack={...graphic,graphic:[...graphic.graphic,20,10,20,20,0,500,2],plan_sha256:"6".repeat(64)};
+      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image,broll,custom,stack];
       if(path.endsWith("/graphic-preview")){
         assert.equal(url.searchParams.get("base_revision"),String(cutRevision));
         assert.equal(url.searchParams.get("base_plan_sha256"),cutSha);
         assert.equal(url.searchParams.get("clip_uid"),"c".repeat(64));
-        assert.equal(url.searchParams.get("graphic"),custom.graphic.join(","));
-        return route.fulfill({json:custom});
+        const result=[custom,stack].find(p=>p.graphic.join(",")===url.searchParams.get("graphic"));
+        assert.ok(result,"mock layer candidate not available");
+        return route.fulfill({json:result});
       }
       if(method==="PUT"){
         const input=route.request().postDataJSON();
@@ -439,6 +441,18 @@ async function main() {
           assert.equal(await graphic.inputValue(),"[23,10,25,25,0,1000,4]");
           await page.waitForFunction(()=>document.querySelector(".cut-graphic-overlay")?.style.left==="23%");
           await layout(page,"390 custom graphic");
+          await graphic.selectOption("[10,10,20,20,0,500,1]");
+          await cut.getByText("Ревизия нарезки: 31",{exact:true}).waitFor();
+          const details=cut.getByText("Точная настройка слоя",{exact:true});
+          if(!await cut.getByRole("button",{name:"Добавить графический слой",exact:true}).isVisible())await details.click();
+          await cut.getByRole("button",{name:"Добавить графический слой",exact:true}).click();
+          await cut.getByRole("button",{name:"Применить параметры",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 32",{exact:true}).waitFor();
+          await cut.getByText("Графические слои: 2",{exact:true}).waitFor();
+          await page.waitForFunction(()=>document.querySelectorAll(".cut-graphic-overlay").length===2);
+          await page.reload();
+          await cut.getByText("Ревизия нарезки: 32",{exact:true}).waitFor();
+          await page.waitForFunction(()=>document.querySelectorAll(".cut-graphic-overlay").length===2);
 
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");
