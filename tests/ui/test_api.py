@@ -847,8 +847,12 @@ def test_custom_solid_stack_preview_save_reload_undo_redo(client,tmp_root):
     assert target["graphic"]==code
     assert client.get(path).json()==initial
     assert not (tmp_root/".ui-synthetic-editor.sqlite3").exists()
-    mixed=[*code[:-1],3]
-    assert client.get(path+"/graphic-preview",params={**params,"graphic":",".join(map(str,mixed))}).status_code==409
+    mixed=[*code,10,10,25,25,0,500,3,40,10,25,25,0,1000,4]
+    mixed_result=client.get(path+"/graphic-preview",params={**params,"graphic":",".join(map(str,mixed))})
+    assert mixed_result.status_code==200,mixed_result.text
+    assert mixed_result.json()["graphic"]==mixed
+    duplicate=[*mixed[:21],*mixed[14:21]]
+    assert client.get(path+"/graphic-preview",params={**params,"graphic":",".join(map(str,duplicate))}).status_code==409
     assert client.get(path+"/graphic-preview",params={**params,"graphic":",".join(map(str,code*3))}).status_code==422
     def choose(state,p,op,navigation=None):
         response=client.put(path,json=dict(op_id=op,base_revision=state["revision"],
@@ -864,6 +868,9 @@ def test_custom_solid_stack_preview_save_reload_undo_redo(client,tmp_root):
     assert restored["plan_sha256"]==initial["plan_sha256"]
     redone=choose(restored,target,"stack-redo","redo")
     assert redone["plan_sha256"]==saved["plan_sha256"]
+    mixed_saved=choose(redone,mixed_result.json(),"mixed")
+    assert client.get(path).json()==mixed_saved
+    assert mixed_saved["history"][0]["graphic"]==mixed
 
 def test_register_bundled_media_in_local_library(tmp_path):
     from autoreels.orchestr.synthetic_asset_catalog import register_fixture_assets, VISUAL_ASSETS

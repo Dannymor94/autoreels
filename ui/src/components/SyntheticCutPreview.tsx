@@ -257,12 +257,12 @@ export function SyntheticCutPreview() {
   function editLayers(next:number[][]){
     setGraphicDraft(next.flat());setGraphicError(false);
   }
-  async function applyGraphic(){
+  async function applyGraphic(code=customGraphic){
     const state=q.data;
-    if(!state||!customGraphic||locked||guard.current)return;
+    if(!state||!code||locked||guard.current)return;
     guard.current=true;setPreviewBusy(true);setGraphicError(false);
     let next:CutPreview|undefined;
-    try{next=await api.previewGraphic(state,customGraphic);}
+    try{next=await api.previewGraphic(state,code);}
     catch{setGraphicError(true);}
     finally{guard.current=false;setPreviewBusy(false);}
     if(next)changePlan(next);
@@ -378,13 +378,21 @@ export function SyntheticCutPreview() {
     <div className="media-catalog">
       {q.data.visual_assets.map(asset=>{
         const target=graphics.find(p=>p.graphic?.length===7&&p.graphic[6]===asset.number);
+        const already=layers.some(layer=>layer[6]===asset.number);
+        const canAdd=layers.length<4&&!already&&plan.duration>=0.1;
         return <article key={asset.number}>
           {asset.format==="png"?<img src="/synthetic-graphic-image.png" alt="Тестовая фотография" width={54} height={96}/>:
             <video src="/synthetic-broll.mp4" muted playsInline preload="metadata" width={54} height={96}/>}
           <strong>{asset.format==="png"?"Тестовая фотография":"Тестовый B-roll"}</strong>
           <p className="secondary">{asset.format.toUpperCase()} · {asset.label}</p>
-          <button type="button" disabled={locked||!target||target.plan_sha256===plan.plan_sha256}
-            onClick={()=>target&&changePlan(target)}>{graphic?"Заменить текущие слои":"Добавить в монтаж"} · {asset.format.toUpperCase()}</button>
+          <button type="button" disabled={locked||!!graphicDraft||!canAdd}
+            onClick={()=>void applyGraphic([...layers.flat(),10,10,25,25,0,
+              Math.min(asset.number===4?1000:500,Math.floor(plan.duration*1000)),asset.number])}>
+            Добавить в монтаж · {asset.format.toUpperCase()}</button>
+          {graphic&&<button type="button" disabled={locked||!!graphicDraft||!target||target.plan_sha256===plan.plan_sha256}
+            onClick={()=>target&&changePlan(target)}>Заменить текущие слои · {asset.format.toUpperCase()}</button>}
+          {already&&<p className="secondary">Этот тип медиа уже в монтаже.</p>}
+          {graphicError&&<p role="status">Не удалось применить параметры слоя.</p>}
           <details><summary>Происхождение файла</summary><p className="secondary">{asset.rights_note}</p><p className="secondary" style={{overflowWrap:"anywhere"}}>SHA-256: {asset.sha256}</p></details>
         </article>;
       })}
@@ -423,7 +431,7 @@ export function SyntheticCutPreview() {
           <button type="button" disabled={locked} onClick={()=>editLayers(draftLayers.filter((_,j)=>j!==index))}>Удалить слой {index+1}</button>
         </>}
       </fieldset>)}
-      <button type="button" disabled={locked||draftLayers.length>=4||draftLayers.some(layer=>layer[6]>2)||plan.duration<0.1}
+      <button type="button" disabled={locked||draftLayers.length>=4||plan.duration<0.1}
         onClick={()=>editLayers([...draftLayers,[20,10,20,20,0,Math.min(500,Math.floor(plan.duration*1000)),2]])}>Добавить графический слой</button>
       {graphicDraft&&<button type="button" disabled={locked} onClick={()=>{setGraphicDraft(null);setGraphicError(false);}}>Отменить настройку слоёв</button>}
       <button type="button" disabled={locked||!graphicDraft} onClick={()=>void applyGraphic()}>Применить параметры</button>
@@ -432,7 +440,7 @@ export function SyntheticCutPreview() {
     <div className="cut-track cut-music" role="img" aria-label="Графический слой на таймлайне">
       {layers.map((layer,i)=><span key={i} style={{left:layer[4]/1000/plan.duration*100+"%",width:(layer[5]-layer[4])/1000/plan.duration*100+"%"}}/>)}
     </div>
-    <p className="secondary">До четырёх одноцветных слоёв, снизу вверх. Фото и видео пока по одному. Для других изменений монтажа сначала убери слои. Отмена и повтор сохраняют набор.</p>
+    <p className="secondary">До четырёх слоёв, снизу вверх. В одном наборе — не более одного фото и одного видео. Для других изменений монтажа сначала убери слои. Отмена и повтор сохраняют набор.</p>
     <h3>Звуковые дорожки</h3>
     <div className="cut-track-label"><strong>Фоновая дорожка</strong><span>{music?seconds(plan.duration):"Нет"}</span></div>
     <div className="cut-track cut-music" role="img" aria-label="Фоновая дорожка на таймлайне">
