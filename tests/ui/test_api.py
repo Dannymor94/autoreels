@@ -752,3 +752,29 @@ def test_synthetic_graphic_layer_history_and_invalid_selection(client,tmp_root):
     response=put(response.json(),graphic,"graphic-redo",navigation="redo")
     assert response.status_code==200,response.text
     assert response.json()["plan_sha256"]==graphic["plan_sha256"]
+
+
+def test_custom_graphic_preview_and_exact_commit(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    view=client.get("/api/synthetic-cut").json()
+    path="/api/synthetic-cut/graphic-preview"
+    params=dict(base_revision=view["revision"],base_plan_sha256=view["plan_sha256"],
+                clip_uid=view["clip_uid"],graphic="23,17,31,42,100,700,1")
+    assert client.get(path,params={**params,"graphic":"99,10,20,20,0,500,1"}).status_code==409
+    candidate=client.get(path,params=params)
+    assert candidate.status_code==200,candidate.text
+    target=candidate.json()
+    assert target["graphic"]==[23,17,31,42,100,700,1]
+    assert client.get(path,params=params).json()==target
+    assert client.get("/api/synthetic-cut").json()==view
+    assert not (tmp_root/".ui-synthetic-editor.sqlite3").exists()
+    op=dict(op_id="custom-layer",base_revision=view["revision"],base_plan_sha256=view["plan_sha256"],
+            clip_uid=view["clip_uid"],candidate_plan_sha256=target["plan_sha256"],
+            removed=target["removed"],graphic=target["graphic"])
+    result=client.put("/api/synthetic-cut",json=op)
+    assert result.status_code==200,result.text
+    assert result.json()["plan_sha256"]==target["plan_sha256"]
+    assert client.get("/api/synthetic-cut").json()==result.json()
+    assert client.get(path,params=params).status_code==409

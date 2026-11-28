@@ -69,13 +69,18 @@ FIXTURE_GRAPHICS = (
 def graphic_for(code):
     if code is None:
         return None
-    if tuple(code) not in FIXTURE_GRAPHICS:
+    if len(code)!=7 or any(type(n) is not int for n in code):
         raise Conflict("invalid fixture graphic")
     x, y, w, h, start, end, color = code
-    return GraphicLayer(x_pct=x, y_pct=y, width_pct=w, height_pct=h,
-                        start_ms=start, end_ms=end, color={1:"white",2:"blue"}.get(color),
-                        image=IMAGE if color==3 else None,
-                        video=VIDEO if color==4 else None)
+    if color not in (1,2,3,4) or min(w,h)<5 or end>6000:
+        raise Conflict("invalid fixture graphic")
+    try:
+        return GraphicLayer(x_pct=x, y_pct=y, width_pct=w, height_pct=h,
+                            start_ms=start, end_ms=end, color={1:"white",2:"blue"}.get(color),
+                            image=IMAGE if color==3 else None,
+                            video=VIDEO if color==4 else None)
+    except ValueError as exc:
+        raise Conflict("invalid fixture graphic") from exc
 
 
 class FixtureSelection(BaseModel):

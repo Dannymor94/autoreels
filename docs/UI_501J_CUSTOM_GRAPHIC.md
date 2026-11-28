@@ -1,0 +1,3 @@
+# UI-501J — exact custom graphic geometry
+
+Allow integer final-frame percentages and output milliseconds for the fixed synthetic assets, preserving existing preset codes and plan hashes. Read-only candidate preview binds the current revision, plan hash and clip UID; the existing CAS command recomputes and saves the exact candidate. No Cartesian catalog, new database schema or arbitrary media/path/filter input. The UI applies requested dimensions, position and timing through the server candidate; actual FFmpeg already uses the same typed geometry. Focused API regression covers invalid bounds, deterministic read-only preview, no DB creation, exact commit, reload and stale base. Synthetic editor only. No user media or deployment. Exact-head CI.

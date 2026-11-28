@@ -30,7 +30,7 @@ async function mock(page, mode = "normal") {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
-    if(path==="/api/synthetic-cut"){
+    if(path==="/api/synthetic-cut"||path==="/api/synthetic-cut/graphic-preview"){
       const baseline={removed:[],order:[1,2,3],duration:3,plan_sha256:"a".repeat(64),windows:[{source_start:0,source_end:3,output_start:0,output_end:3}]};
       const candidate={removed:[2],order:[1,3],duration:1.8,plan_sha256:"b".repeat(64),windows:[{source_start:0,source_end:0.9,output_start:0,output_end:0.9},{source_start:2.1,source_end:3,output_start:0.9,output_end:1.8}]};
       const permutation=(order,hash)=>({removed:[],order,duration:3,plan_sha256:hash.repeat(64),
@@ -47,7 +47,15 @@ async function mock(page, mode = "normal") {
       const graphic={...reordered,graphic:[10,10,20,20,0,500,1],plan_sha256:"4".repeat(64)};
       const image={...reordered,graphic:[10,10,25,25,0,500,3],plan_sha256:"3".repeat(64)};
       const broll={...reordered,graphic:[10,10,25,25,0,1000,4],plan_sha256:"2".repeat(64)};
-      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image,broll];
+      const custom={...broll,graphic:[23,10,25,25,0,1000,4],plan_sha256:"1".repeat(64)};
+      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image,broll,custom];
+      if(path.endsWith("/graphic-preview")){
+        assert.equal(url.searchParams.get("base_revision"),String(cutRevision));
+        assert.equal(url.searchParams.get("base_plan_sha256"),cutSha);
+        assert.equal(url.searchParams.get("clip_uid"),"c".repeat(64));
+        assert.equal(url.searchParams.get("graphic"),custom.graphic.join(","));
+        return route.fulfill({json:custom});
+      }
       if(method==="PUT"){
         const input=route.request().postDataJSON();
         assert.equal(input.base_revision,cutRevision);
@@ -399,6 +407,13 @@ async function main() {
           await cut.getByText("Ревизия нарезки: 29",{exact:true}).waitFor();
           assert.equal(await graphic.inputValue(),"[10,10,25,25,0,1000,4]");
           await page.waitForFunction(()=>document.querySelector(".cut-graphic-overlay video")?.videoWidth===36);
+          await cut.getByText("Точная настройка слоя",{exact:true}).click();
+          await cut.getByLabel("X, %",{exact:true}).fill("23");
+          await cut.getByRole("button",{name:"Применить параметры",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 30",{exact:true}).waitFor();
+          assert.equal(await graphic.inputValue(),"[23,10,25,25,0,1000,4]");
+          await page.waitForFunction(()=>document.querySelector(".cut-graphic-overlay")?.style.left==="23%");
+          await layout(page,"390 custom graphic");
 
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");

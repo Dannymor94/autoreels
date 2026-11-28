@@ -3187,6 +3187,72 @@
         "summary": "Synthetic Cut Command"
       }
     },
+    "/api/synthetic-cut/graphic-preview": {
+      "get": {
+        "operationId": "synthetic_graphic_preview_api_synthetic_cut_graphic_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "base_revision",
+            "required": true,
+            "schema": {
+              "title": "Base Revision",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base_plan_sha256",
+            "required": true,
+            "schema": {
+              "title": "Base Plan Sha256",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "clip_uid",
+            "required": true,
+            "schema": {
+              "title": "Clip Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "graphic",
+            "required": true,
+            "schema": {
+              "title": "Graphic",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CutPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthetic Graphic Preview"
+      }
+    },
     "/api/synthetic-editor": {
       "get": {
         "operationId": "synthetic_editor_view_api_synthetic_editor_get",
