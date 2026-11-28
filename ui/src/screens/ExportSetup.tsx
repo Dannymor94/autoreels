@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type RenderMode } from "../api/client";
 import { PipelineSettingsPanel } from "../components/PipelineSettingsPanel";
 import { ModuleSettingsPanel } from "../components/ModuleSettingsPanel";
+import { MobileCodecProbe } from "../components/MobileCodecProbe";
 
 const descriptions = {
   desktop: { name: "Мой компьютер", detail: "Обработка на компьютере владельца, без обязательного сервера." },
@@ -40,6 +41,7 @@ export function ExportSetup() {
       <p role="status">{nodes.length === 0 ? "Подключённых исполнителей нет" : "Зарегистрировано исполнителей: " + nodes.length}</p>
       {nodes.map(t => <p key={t.target_id} className="secondary">{t.platform} · {t.authorized && t.availability === "ready" ? "Готовность подтверждена" : "Недоступен для запуска"}</p>)}
     </section>}
+    {selected?.kind==="mobile"&&<MobileCodecProbe/>}
     <PipelineSettingsPanel />
     <ModuleSettingsPanel />
     <button className="render-start" disabled>Запустить рендер</button>

@@ -499,6 +499,13 @@ async function main() {
           assert.equal(await page.getByRole("radio",{name:/Мой компьютер/}).isChecked(),false);
           await page.getByRole("radio",{name:/На телефоне/}).check();
           await page.getByText("Подключённых исполнителей нет",{exact:true}).waitFor();
+          await page.getByRole("button",{name:"Проверить локальный H.264",exact:true}).click();
+          const probe=page.getByTestId("local-codec-result");
+          await probe.waitFor({timeout:12000});
+          const codecResult=await probe.getAttribute("data-result");
+          assert.ok(["pass","unsupported","failed"].includes(codecResult));
+          if(codecResult==="pass")await probe.getByText(/Проверено кадров: 6/).waitFor();
+          console.log("Local codec probe result (not mobile readiness): "+codecResult);
           assert.equal(await page.getByRole("button",{name:"Запустить рендер",exact:true}).isDisabled(),true);
           await page.getByLabel("Число роликов для пробной настройки").fill("7");
           await page.getByLabel("Профиль для пробной настройки").selectOption("hevc");
