@@ -328,6 +328,7 @@ class Reel(BaseModel):
     # Visual-only dip at internal hard cuts, milliseconds on each side.
     seam_dip_ms: Literal[100, 200, 300] | None = None
     graphic_layer: GraphicLayer | None = None
+    graphic_layers: list[GraphicLayer] | None = None
 
     @model_serializer(mode="wrap")
     def _serialize_rates(self, handler):
@@ -340,6 +341,8 @@ class Reel(BaseModel):
             data.pop("seam_dip_ms", None)
         if self.graphic_layer is None:
             data.pop("graphic_layer", None)
+        if self.graphic_layers is None:
+            data.pop("graphic_layers", None)
         return data
 
     @model_validator(mode="after")
@@ -380,10 +383,17 @@ class Reel(BaseModel):
                 raise ValueError("window too short for seam dip")
 
     def check_graphic_layer(self) -> None:
-        if self.graphic_layer is None:
+        if self.graphic_layer is None and self.graphic_layers is None:
             return
+        if self.graphic_layers is not None:
+            if self.graphic_layer is not None or not 1<=len(self.graphic_layers)<=4:
+                raise ValueError("use one legacy layer or a bounded ordered layer stack")
+            if any(layer.color is None or layer.image is not None or layer.video is not None
+                   for layer in self.graphic_layers):
+                raise ValueError("layer stack supports solid graphics only")
         from autoreels.core.playback_timing import build_window_timing
-        layer = GraphicLayer.model_validate_json(self.graphic_layer.model_dump_json())
+        layers = [GraphicLayer.model_validate_json(layer.model_dump_json())
+                  for layer in self.graphic_layers or [self.graphic_layer]]
         windows = self.playback_windows()
         if (not self.planned or self.speed != 1.0 or self.cold_open is not None
                 or self.beat_gap_sec is not None or self.montage or self.fx
@@ -392,7 +402,7 @@ class Reel(BaseModel):
                 or any(s.window_cut or s.close_intervals or s.prerolled for s in windows)):
             raise ValueError("graphic layer requires a simple planned hard-cut body")
         timing = build_window_timing(windows, self.window_rates or [1.0] * len(windows))
-        if layer.end_ms / 1000 > timing[-1].output_end + 1e-9:
+        if any(layer.end_ms / 1000 > timing[-1].output_end + 1e-9 for layer in layers):
             raise ValueError("graphic layer extends beyond montage duration")
 
     def effective_segments(self) -> list["Segment"]:

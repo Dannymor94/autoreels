@@ -3069,9 +3069,11 @@ def _render_segments(
                 bound_music[reel.id] = resolve_audio_asset(assets_dir, track.asset)
             except ValueError as exc:
                 raise RenderError(str(exc)) from exc
-    graphics = [r for r in manifest.reels if r.graphic_layer is not None]
+    graphics = [r for r in manifest.reels if r.graphic_layer is not None or r.graphic_layers is not None]
     bound_images = {}
     for reel in graphics:
+        if reel.graphic_layer is None:
+            continue
         image, video = reel.graphic_layer.image, reel.graphic_layer.video
         if image is not None or video is not None:
             asset = image if image is not None else video
@@ -3085,7 +3087,8 @@ def _render_segments(
     if graphics and (vf is None or suffix):
         raise RenderError("graphic layers require final-frame crop rendering")
     special = [r for r in manifest.reels if r.window_rates is not None
-               or r.seam_dip_ms is not None or r.graphic_layer is not None]
+               or r.seam_dip_ms is not None or r.graphic_layer is not None
+               or r.graphic_layers is not None]
     for reel in special:
         try:
             reel.check_segments()
@@ -3429,6 +3432,9 @@ def _render_segments(
                 else:
                     graphic_vf = _graphic_layer_filter(reel.graphic_layer)
                     reel_vf = f"{reel_vf},{graphic_vf}" if reel_vf else graphic_vf
+            for layer in reel.graphic_layers or []:
+                graphic_vf = _graphic_layer_filter(layer)
+                reel_vf = f"{reel_vf},{graphic_vf}" if reel_vf else graphic_vf
             _title = getattr(reel, "title_overlay", "") or ""
             _fx_ass = None
             if _fx and (_fx.get("karaoke") or _fx.get("progress") or _fx.get("callouts")):
@@ -3707,10 +3713,11 @@ def _render_segments(
                                                        seam_xfades=_ts_seam_xfades))
             # Final (post-speed) length: tail fades (audio and video) land on the real clip end.
             _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
-            if reel.graphic_layer is not None and (
+            layers = reel.graphic_layers or ([reel.graphic_layer] if reel.graphic_layer is not None else [])
+            if layers and (
                     _synth_active or _end_ext or _end_loop or _xfade_actual
                     or any(_ts_seam_xfades or []) or any(_ts_seam_visual or [])
-                    or reel.graphic_layer.end_ms / 1000 > _out_dur + 1e-9):
+                    or any(layer.end_ms / 1000 > _out_dur + 1e-9 for layer in layers)):
                 raise RenderError("graphic layer incompatible with final montage timing")
             # M55e: a sped-up clip is made an exact whole number of frames at the output rate (the
             # setpts timeline has 1.05× the frame rate; the muxer re-timed it to the source rate and
@@ -4440,7 +4447,8 @@ def render_preview(
         if reel is None:
             raise RenderError(f"клип '{reel_id}' не найден в манифесте")
     if (reel.window_rates is not None or reel.background_track is not None
-            or reel.seam_dip_ms is not None or reel.graphic_layer is not None):
+            or reel.seam_dip_ms is not None or reel.graphic_layer is not None
+            or reel.graphic_layers is not None):
         raise RenderError("palette preview does not support independent rates or explicit layers yet")
     short_end = min(reel.end, reel.start + seconds)
     zoom_cfg = render_cfg.zoom
