@@ -2962,11 +2962,19 @@ def _image_layer_filter(layer: GraphicLayer, size, filename: str, index: int = 0
     demux = "mov" if layer.video is not None else "image2"
     shift = f",setpts=PTS-STARTPTS+{layer.start_ms/1000:.3f}/TB" if layer.video is not None else ""
     eof = "pass:repeatlast=0" if layer.video is not None else "repeat"
+    # Both keyframes use the existing final-frame output clock.
+    x_expr, y_expr = str(x), str(y)
+    if layer.motion is not None:
+        end_x = sw*layer.motion.end_x_pct//100
+        end_y = sh*layer.motion.end_y_pct//100
+        progress = f"clip((t-{layer.start_ms/1000:.3f})/{(layer.end_ms-layer.start_ms)/1000:.3f},0,1)"
+        x_expr = f"'{x}+({end_x-x})*{progress}'"
+        y_expr = f"'{y}+({end_y-y})*{progress}'"
     return (
         f"[graphicbase{index}];movie=filename={filename}:format_name={demux}:dec_threads=1,"
         f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
         f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1{shift}[graphicimage{index}];"
-        f"[graphicbase{index}][graphicimage{index}]overlay=x={x}:y={y}:eof_action={eof}:"
+        f"[graphicbase{index}][graphicimage{index}]overlay=x={x_expr}:y={y_expr}:eof_action={eof}:"
         f"enable='gte(t,{layer.start_ms/1000:.3f})*lt(t,{layer.end_ms/1000:.3f})'"
     )
 

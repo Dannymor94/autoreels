@@ -405,7 +405,7 @@ def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
     assert base.setup.crop.model_dump()==dict(x=0,y=0,w=96,h=160)
 
 
-@pytest.mark.parametrize("dip,kind", [(None,"none"),(200,"solid"),(200,"image"),(200,"video"),(200,"stack"),(200,"mixed")])
+@pytest.mark.parametrize("dip,kind", [(None,"none"),(200,"solid"),(200,"image"),(200,"video"),(200,"stack"),(200,"mixed"),(200,"motion")])
 def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, kind):
     import numpy as np
     from autoreels.core.models import AudioAsset, BackgroundTrack, GraphicLayer, ImageAsset, Segment, VideoAsset
@@ -436,7 +436,7 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
     assert resolve_audio_asset(assets,asset)==path
     track=BackgroundTrack(asset=asset,volume=0.25,fade_seconds=0.0,ducking=False,final_normalize=False)
     image = video = None
-    if kind in ("image","mixed"):
+    if kind in ("image","mixed","motion"):
         png = assets/"test.png"
         run("-v","error","-f","lavfi","-i","color=red:s=36x64",
             "-vf","drawbox=x=18:y=0:w=18:h=64:color=blue:t=fill",
@@ -461,6 +461,9 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
     graphic = GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
                            start_ms=1000,end_ms=2000,color=None if image or video else "white",
                            image=image,video=video) if dip and kind!="mixed" else None
+    if kind=="motion":
+        from autoreels.core.models import LayerMotion
+        graphic=graphic.model_copy(update={"motion":LayerMotion(end_x_pct=70,end_y_pct=10)})
     layers = None
     if kind=="stack":
         layers=[graphic,GraphicLayer(x_pct=20,y_pct=10,width_pct=20,height_pct=20,
@@ -540,7 +543,18 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
                     return (float((patch[:,:,0]-patch[:,:,2]>120).mean()),
                             float((patch[:,:,2]-patch[:,:,0]>120).mean()))
                 return float(np.all(patch>230,axis=2).mean())
-            if video:
+            if kind=="motion":
+                def moving_patch(t,x):
+                    frame=run("-v","error","-ss",str(t),"-i",output,"-frames:v","1",
+                              "-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
+                    p=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)[80:180,x+8:x+28].astype(float)
+                    q=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)[80:180,x+44:x+64].astype(float)
+                    return float((p[:,:,0]-p[:,:,2]>120).mean()),float((q[:,:,2]-q[:,:,0]>120).mean())
+                for t,x in ((1.1,58),(1.5,144),(1.8,209)):
+                    assert min(moving_patch(t,x))>0.95
+                assert min(moving_patch(1.8,36))<0.7
+                assert min(moving_patch(2.5,252))<0.7
+            elif video:
                 assert white_share(1.2)[0]>0.95
                 assert white_share(1.7)[1]>0.95
                 assert max(white_share(0.5))<0.9 and max(white_share(2.5))<0.9
