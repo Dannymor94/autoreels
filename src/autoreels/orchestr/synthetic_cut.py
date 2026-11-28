@@ -497,7 +497,7 @@ def preview_graphic(root: Path, enabled: bool, base_revision: int,
     """Read-only, exact current-montage candidate; no persisted draft or asset input."""
     if not enabled:
         raise HTTPException(409,"synthetic editor disabled")
-    if not re.fullmatch(r"[0-9]{1,5}(?:,[0-9]{1,5}){6}(?:(?:,[0-9]{1,5}){7}){0,3}",graphic):
+    if not re.fullmatch(r"(?:[0-9]{1,5}(?:,[0-9]{1,5}){6}(?:(?:,[0-9]{1,5}){7}){0,3}|1000(?:,[0-9]{1,5}){9}(?:(?:,[0-9]{1,5}){9}){0,3})",graphic):
         raise HTTPException(422,"invalid graphic parameters")
     state = view(root,enabled)
     if (state.revision != base_revision or state.plan_sha256 != base_plan_sha256

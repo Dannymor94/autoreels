@@ -17,7 +17,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from autoreels.core.models import Crop, GraphicLayer, Manifest
+from autoreels.core.models import Crop, GraphicLayer, LayerMotion, Manifest
 from .synthetic_soundtrack import soundtrack
 from .synthetic_asset_catalog import VISUAL_ASSETS
 
@@ -70,27 +70,40 @@ FIXTURE_GRAPHICS = (
 def graphic_for(code):
     if code is None:
         return None
-    if len(code)!=7 or any(type(n) is not int for n in code):
+    if len(code) not in (7,9) or any(type(n) is not int for n in code):
         raise Conflict("invalid fixture graphic")
-    x, y, w, h, start, end, color = code
+    x, y, w, h, start, end, color = code[:7]
     if color not in (1,2,3,4) or min(w,h)<5 or end>6000:
         raise Conflict("invalid fixture graphic")
     try:
         return GraphicLayer(x_pct=x, y_pct=y, width_pct=w, height_pct=h,
                             start_ms=start, end_ms=end, color={1:"white",2:"blue"}.get(color),
                             image=_VISUALS[3] if color==3 else None,
-                            video=_VISUALS[4] if color==4 else None)
+                            video=_VISUALS[4] if color==4 else None,
+                            motion=LayerMotion(end_x_pct=code[7],end_y_pct=code[8]) if len(code)==9 else None)
     except ValueError as exc:
         raise Conflict("invalid fixture graphic") from exc
 
 
 def graphic_fields(code):
     """Preserve the legacy single layer; flatten only the bounded ordered stack."""
-    if code is None or len(code)==7:
-        return {"graphic_layer":graphic_for(code),"graphic_layers":None}
-    if len(code) not in (14,21,28):
-        raise Conflict("invalid fixture layer stack")
-    layers=[graphic_for(code[i:i+7]) for i in range(0,len(code),7)]
+    # Prefix 1000 cannot be a valid legacy X. Static groups use 100,100.
+    if code is not None and code[:1]==(1000,):
+        body=code[1:]
+        if len(body) not in (9,18,27,36):
+            raise Conflict("invalid fixture motion stack")
+        groups=[body[i:i+9] for i in range(0,len(body),9)]
+        if all(group[7:]==(100,100) for group in groups):
+            raise Conflict("static layers must use legacy encoding")
+        layers=[graphic_for(group[:7] if group[7:]==(100,100) else group) for group in groups]
+    else:
+        if code is None or len(code)==7:
+            return {"graphic_layer":graphic_for(code),"graphic_layers":None}
+        if len(code) not in (14,21,28):
+            raise Conflict("invalid fixture layer stack")
+        layers=[graphic_for(code[i:i+7]) for i in range(0,len(code),7)]
+    if len(layers)==1:
+        return {"graphic_layer":layers[0],"graphic_layers":None}
     if (sum(layer.image is not None for layer in layers)>1
             or sum(layer.video is not None for layer in layers)>1):
         raise Conflict("fixture stack allows at most one photo and one video")
