@@ -804,3 +804,21 @@ def test_whole_source_separate_revision_store(tmp_root):
     assert restored.current_removed==[]
     redone=choose(restored,restored.redo,"redo-whole","redo")
     assert redone.current_removed==[2,3] and redone.plan_sha256==saved.plan_sha256
+
+def test_whole_source_api_explicit_selection(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    path="/api/synthetic-whole"
+    assert client.get(path).json()["enabled"] is False
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    view=client.get(path).json()
+    assert view["current_removed"]==[] and view["plans"][0]["duration"]==20
+    target=next(p for p in view["plans"] if p["removed"]==[2,4])
+    body=dict(op_id="whole-api",base_revision=0,base_plan_sha256=view["plan_sha256"],
+        clip_uid=view["clip_uid"],candidate_plan_sha256=target["plan_sha256"],removed=[2,4])
+    assert client.put(path,json={**body,"removed":[1]}).status_code==409
+    response=client.put(path,json=body)
+    assert response.status_code==200,response.text
+    assert response.json()["current_removed"]==[2,4]
+    assert client.get(path).json()==response.json()
+    assert client.get("/api/synthetic-cut").json()["revision"]==0

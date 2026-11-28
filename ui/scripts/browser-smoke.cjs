@@ -23,6 +23,7 @@ async function mock(page, mode = "normal") {
   const comparisons = new Map();
   const jobs = new Map();
   let cutRevision=0,cutRemoved=[],cutHistory=[],cutSha="a".repeat(64);
+  let wholeRevision=0,wholeRemoved=[];
   let editor = {enabled:mode==="normal",revision:0,plan_sha256:"a".repeat(64),clip_uid:"b".repeat(64),
     words:[{index:0,word:"Превет",start:0.1,end:0.8},{index:1,word:"друзья!",start:1,end:2}],
     history:[],undo:null,redo:null};
@@ -30,6 +31,23 @@ async function mock(page, mode = "normal") {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
+    if(path==="/api/synthetic-whole"){
+      const rows=["Сегодня мы поговорим о внимании.","Сегодня мы поговорим о внимании!","Я хочу вам рассказать...","Я хочу вам рассказать одну историю.","Эту мысль важно сохранить."].map((text,i)=>({number:i+1,text,start_ms:i*4000+200,end_ms:i*4000+2550}));
+      const full={removed:[],order:[1,2,3,4,5],duration:20,plan_sha256:"a".repeat(64),windows:[{source_start:0,source_end:20,output_start:0,output_end:20}]};
+      const one={removed:[2],order:[1,3,4,5],duration:16,plan_sha256:"b".repeat(64),windows:[{source_start:0,source_end:4,output_start:0,output_end:4},{source_start:8,source_end:20,output_start:4,output_end:16}]};
+      const plans=[full,one];
+      const current=()=>wholeRemoved.length?one:full;
+      if(method==="PUT"){
+        const input=route.request().postDataJSON();
+        assert.equal(input.base_revision,wholeRevision);
+        assert.equal(input.base_plan_sha256,current().plan_sha256);
+        assert.equal(input.clip_uid,"c".repeat(64));
+        const target=plans.find(p=>JSON.stringify(p.removed)===JSON.stringify(input.removed));
+        assert.equal(input.candidate_plan_sha256,target.plan_sha256);
+        wholeRemoved=target.removed;wholeRevision++;
+      }
+      return route.fulfill({json:{enabled:mode==="normal",review:{source_duration_ms:20000,review_sha256:"d".repeat(64),sentences:rows,candidates:[]},revision:wholeRevision,plan_sha256:current().plan_sha256,clip_uid:"c".repeat(64),current_removed:wholeRemoved,plans,undo:wholeRemoved.length?full:null,redo:!wholeRemoved.length&&wholeRevision?one:null}});
+    }
     if(path==="/api/synthetic-cut"||path==="/api/synthetic-cut/graphic-preview"){
       const baseline={removed:[],order:[1,2,3],duration:3,plan_sha256:"a".repeat(64),windows:[{source_start:0,source_end:3,output_start:0,output_end:3}]};
       const candidate={removed:[2],order:[1,3],duration:1.8,plan_sha256:"b".repeat(64),windows:[{source_start:0,source_end:0.9,output_start:0,output_end:0.9},{source_start:2.1,source_end:3,output_start:0.9,output_end:1.8}]};
@@ -222,6 +240,13 @@ async function main() {
           await cut.getByText("Возможные повторы: 2",{exact:true}).waitFor();
           await cut.getByText("Повтор текста",{exact:true}).waitFor();
           await cut.getByText("Возможный повторный дубль",{exact:true}).waitFor();
+          await cut.getByRole("checkbox",{name:"Убрать фразу 2",exact:true}).check();
+          await cut.getByText("Длительность плана: 16.00 с",{exact:true}).waitFor();
+          await cut.getByRole("button",{name:"Сохранить очистку видео",exact:true}).click();
+          await cut.getByText("Ревизия целого видео: 1",{exact:true}).waitFor();
+          await cut.getByRole("button",{name:"Отменить очистку",exact:true}).click();
+          await cut.getByText("Ревизия целого видео: 2",{exact:true}).waitFor();
+          assert.equal(await cut.getByRole("checkbox",{name:"Убрать фразу 2",exact:true}).isChecked(),false);
           await cut.getByText("Длинное видео: пример поиска дублей",{exact:true}).click();
           await cut.getByText("Ревизия нарезки: 0",{exact:true}).waitFor();
           await cut.getByRole("button",{name:"Лишнее.",exact:true}).click();

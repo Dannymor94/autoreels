@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type CutPreview, type CutCommand } from "../api/client";
 import type { components } from "../api/types.gen";
+import { WholeSourceControls } from "./WholeSourceControls";
 type Selection=components["schemas"]["CutSelectionEvent"];
 
 const queryKey = ["synthetic-cut"];
@@ -493,6 +494,7 @@ export function SyntheticCutPreview() {
         <p className="secondary">Совпавших слов: {candidate.matched_tokens}. Проверь смысл обеих фраз перед удалением.</p>
       </div>)}
       <p className="secondary">Таймкоды транскрипта, не границы вырезания.</p>
+      <WholeSourceControls/>
     </details>}
     <details><summary>История нарезки ({q.data.history.length})</summary>
       {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {(h.navigation==="undo"?"Отмена · ":h.navigation==="redo"?"Повтор · ":"")+(h.crop?"Кадрирование · ":"")+(h.music?"Фон "+h.music[0]+" · "+h.music[1]+"% · ":"")+(h.dip_ms?"Переход "+h.dip_ms+" мс · ":"")+(h.graphic?"Графический слой · ":"")+(h.rates?"Скорость: "+h.rates.map(n=>n/100+"×").join(" / "):h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено")}</p>)}

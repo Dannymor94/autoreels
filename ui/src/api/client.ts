@@ -20,6 +20,8 @@ export type ComparisonState = components["schemas"]["ComparisonState"];
 export type CutDemoView = components["schemas"]["CutDemoView"];
 export type CutCommand = components["schemas"]["CutCommand"];
 export type CutPreview = components["schemas"]["CutPreview"];
+export type WholeView = components["schemas"]["WholeView"];
+export type WholeCommand = components["schemas"]["WholeCommand"];
 export type DemoEditorView = components["schemas"]["DemoEditorView"];
 export type DemoCommand = components["schemas"]["DemoCommand"];
 export type DemoEdit = components["schemas"]["DemoEdit"];
@@ -60,6 +62,8 @@ export const api = {
     "/api/synthetic-cut/graphic-preview?"+new URLSearchParams({
       base_revision:String(state.revision),base_plan_sha256:state.plan_sha256,
       clip_uid:state.clip_uid,graphic:graphic.join(",")}),true),
+  syntheticWhole: () => get<WholeView>("/api/synthetic-whole",true),
+  saveSyntheticWhole: (body:WholeCommand) => put<WholeView>("/api/synthetic-whole",body),
   syntheticEditor: () => get<DemoEditorView>("/api/synthetic-editor",true),
   editSynthetic: (body: DemoCommand) => put<DemoEditorView>("/api/synthetic-editor",body),
   health: () => get<HealthResponse>("/api/health"),
