@@ -321,3 +321,20 @@ def test_local_synthetic_asset_library_explicit_import(tmp_path):
     with pytest.raises(ValueError):
         list_assets(root)
     assert not list(root.glob(".intake-*"))
+
+def test_media_motion_is_opt_in_and_bounded():
+    import pytest
+    from autoreels.core.models import GraphicLayer, LayerMotion, ImageAsset
+    asset=ImageAsset(sha256="b"*64,label="test",width=10,height=10,rights="synthetic",rights_note="test")
+    base=dict(x_pct=10,y_pct=10,width_pct=20,height_pct=20,start_ms=1000,end_ms=2000)
+    still=GraphicLayer(**base,image=asset)
+    assert "motion" not in still.model_dump()
+    moved=GraphicLayer(**base,image=asset,motion=LayerMotion(end_x_pct=70,end_y_pct=30))
+    assert GraphicLayer.model_validate_json(moved.model_dump_json())==moved
+    assert moved.model_dump_json()!=still.model_dump_json()
+    with pytest.raises(ValueError):
+        GraphicLayer(**base,image=asset,motion=LayerMotion(end_x_pct=81,end_y_pct=10))
+    with pytest.raises(ValueError):
+        GraphicLayer(**base,color="white",motion=LayerMotion(end_x_pct=20,end_y_pct=10))
+    with pytest.raises(ValueError):
+        LayerMotion(end_x_pct=1.5,end_y_pct=10)

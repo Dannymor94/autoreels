@@ -189,6 +189,13 @@ class BackgroundTrack(BaseModel):
     final_normalize: bool = True
 
 
+class LayerMotion(BaseModel):
+    """Second position keyframe, reached at the exclusive layer end time."""
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    end_x_pct: int = Field(ge=0, lt=100)
+    end_y_pct: int = Field(ge=0, lt=100)
+
+
 class GraphicLayer(BaseModel):
     """One solid rectangle, still or video in final-frame percentages and output milliseconds."""
 
@@ -202,6 +209,7 @@ class GraphicLayer(BaseModel):
     color: Literal["white", "black", "red", "blue"] | None = None
     image: ImageAsset | None = None
     video: VideoAsset | None = None
+    motion: LayerMotion | None = None
 
     @model_serializer(mode="wrap")
     def _serialize_image(self, handler):
@@ -210,6 +218,8 @@ class GraphicLayer(BaseModel):
             data.pop("image", None)
         if self.video is None:
             data.pop("video", None)
+        if self.motion is None:
+            data.pop("motion", None)
         return data
 
     @model_validator(mode="after")
@@ -221,6 +231,10 @@ class GraphicLayer(BaseModel):
         if (self.x_pct + self.width_pct > 100 or self.y_pct + self.height_pct > 100
                 or self.end_ms <= self.start_ms):
             raise ValueError("invalid graphic rectangle or interval")
+        if self.motion is not None and (self.color is not None
+                or self.motion.end_x_pct+self.width_pct>100
+                or self.motion.end_y_pct+self.height_pct>100):
+            raise ValueError("motion requires media and an in-frame endpoint")
         return self
 
 
