@@ -158,6 +158,27 @@ class ImageAsset(BaseModel):
     rights_note: str = Field(min_length=1, max_length=500, pattern=r"\S")
 
 
+class VideoAsset(BaseModel):
+    """Bounded synthetic video-only H.264 MP4 insert, at native playback speed."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    label: str = Field(min_length=1, max_length=120, pattern=r"\S")
+    format: Literal["mp4"] = "mp4"
+    width: int = Field(ge=2, le=1920)
+    height: int = Field(ge=2, le=1920)
+    duration_ms: int = Field(ge=100, le=30000)
+    fps: Literal[30] = 30
+    rights: Literal["synthetic"]
+    rights_note: str = Field(min_length=1, max_length=500, pattern=r"\S")
+
+    @model_validator(mode="after")
+    def _frame_grid(self):
+        if self.width % 2 or self.height % 2 or self.duration_ms * self.fps % 1000:
+            raise ValueError("synthetic B-roll requires even dimensions and complete frames")
+        return self
+
+
 class BackgroundTrack(BaseModel):
     """One optional, full-output-duration looping background audio layer."""
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -169,7 +190,7 @@ class BackgroundTrack(BaseModel):
 
 
 class GraphicLayer(BaseModel):
-    """One solid rectangle or explicit PNG in final-frame percentages and output milliseconds."""
+    """One solid rectangle, still or video in final-frame percentages and output milliseconds."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
     x_pct: int = Field(ge=0, lt=100)
@@ -180,18 +201,23 @@ class GraphicLayer(BaseModel):
     end_ms: int = Field(gt=0)
     color: Literal["white", "black", "red", "blue"] | None = None
     image: ImageAsset | None = None
+    video: VideoAsset | None = None
 
     @model_serializer(mode="wrap")
     def _serialize_image(self, handler):
         data = handler(self)
         if self.image is None:
             data.pop("image", None)
+        if self.video is None:
+            data.pop("video", None)
         return data
 
     @model_validator(mode="after")
     def _bounds(self):
-        if (self.image is None) == (self.color is None):
-            raise ValueError("choose exactly one graphic color or image")
+        if sum(x is not None for x in (self.color,self.image,self.video)) != 1:
+            raise ValueError("choose exactly one graphic color, image or video")
+        if self.video is not None and self.end_ms-self.start_ms > self.video.duration_ms:
+            raise ValueError("B-roll interval exceeds asset duration")
         if (self.x_pct + self.width_pct > 100 or self.y_pct + self.height_pct > 100
                 or self.end_ms <= self.start_ms):
             raise ValueError("invalid graphic rectangle or interval")

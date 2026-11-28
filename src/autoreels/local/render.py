@@ -40,7 +40,7 @@ from autoreels.core.calibration import face_close_crop
 from autoreels.core.models import Crop, GraphicLayer, Manifest, Segment, SetupProfile
 from autoreels.core.playback_timing import build_window_timing
 from autoreels.local.subtitles import build_ass, remap_to_output
-from autoreels.local.assets import resolve_audio_asset, resolve_image_asset
+from autoreels.local.assets import resolve_audio_asset, resolve_image_asset, resolve_video_asset
 from autoreels.local.fx import output_time as fx_output_time, plate_start, punch_point, punch_times, push_vf
 from autoreels.local.fx import timeline as fx_timeline
 from autoreels.local.fx import whoosh_cmd, whoosh_wav_cmd
@@ -2959,11 +2959,14 @@ def _image_layer_filter(layer: GraphicLayer, size, filename: str) -> str:
     if w < 2 or h < 2:
         raise RenderError("image box too small for output frame")
     # Filename is generated internally in a private temporary directory.
+    demux = "mov" if layer.video is not None else "image2"
+    shift = f",setpts=PTS-STARTPTS+{layer.start_ms/1000:.3f}/TB" if layer.video is not None else ""
+    eof = "pass:repeatlast=0" if layer.video is not None else "repeat"
     return (
-        f"[graphicbase];movie=filename={filename}:format_name=image2:dec_threads=1,"
+        f"[graphicbase];movie=filename={filename}:format_name={demux}:dec_threads=1,"
         f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[graphicimage];"
-        f"[graphicbase][graphicimage]overlay=x={x}:y={y}:eof_action=repeat:"
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1{shift}[graphicimage];"
+        f"[graphicbase][graphicimage]overlay=x={x}:y={y}:eof_action={eof}:"
         f"enable='gte(t,{layer.start_ms/1000:.3f})*lt(t,{layer.end_ms/1000:.3f})'"
     )
 
@@ -2982,6 +2985,38 @@ def _stage_graphic_image(ffmpeg_bin: str, source: Path, layer: GraphicLayer, des
                        check=True,capture_output=True,timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
         raise RenderError("graphic image decode failed") from exc
+
+
+def _stage_graphic_video(ffmpeg_bin: str, source: Path, layer: GraphicLayer, destination: Path) -> None:
+    import json
+    asset = layer.video
+    raw = source.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != asset.sha256:
+        raise RenderError("B-roll changed during staging")
+    with destination.open("xb") as handle:
+        handle.write(raw)
+    try:
+        probe = subprocess.run([_sibling_ffprobe(ffmpeg_bin),"-v","error","-f","mov",
+                                "-show_streams","-of","json",str(destination)],
+                               check=True,capture_output=True,timeout=10)
+        streams = json.loads(probe.stdout)["streams"]
+        if len(streams) != 1:
+            raise ValueError("synthetic B-roll must contain one video stream only")
+        stream = streams[0]
+        if (stream["codec_type"] != "video" or stream["codec_name"] != "h264"
+                or stream["pix_fmt"] != "yuv420p"
+                or (stream["width"],stream["height"]) != (asset.width,asset.height)
+                or stream["avg_frame_rate"] != "30/1" or stream["r_frame_rate"] != "30/1"
+                or abs(float(stream["start_time"])) > 1e-6
+                or abs(float(stream["duration"])*1000-asset.duration_ms) > 1
+                or int(stream["nb_frames"]) != asset.duration_ms*asset.fps//1000):
+            raise ValueError("synthetic B-roll metadata mismatch")
+        subprocess.run([ffmpeg_bin,"-v","error","-xerror","-nostdin",
+                        "-f","mov","-threads","1","-i",str(destination),
+                        "-map","0:v:0","-f","null","-"],
+                       check=True,capture_output=True,timeout=20)
+    except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
+        raise RenderError("synthetic B-roll validation failed") from exc
 
 
 def _render_segments(
@@ -3037,12 +3072,14 @@ def _render_segments(
     graphics = [r for r in manifest.reels if r.graphic_layer is not None]
     bound_images = {}
     for reel in graphics:
-        image = reel.graphic_layer.image
-        if image is not None:
-            if assets_dir is None or image.rights != "synthetic":
-                raise RenderError("image layer requires an explicitly staged synthetic asset")
+        image, video = reel.graphic_layer.image, reel.graphic_layer.video
+        if image is not None or video is not None:
+            asset = image if image is not None else video
+            if assets_dir is None or asset.rights != "synthetic":
+                raise RenderError("media layer requires an explicitly staged synthetic asset")
             try:
-                bound_images[reel.id] = resolve_image_asset(assets_dir, image)
+                bound_images[reel.id] = (resolve_image_asset(assets_dir,image) if image is not None
+                                         else resolve_video_asset(assets_dir,video))
             except ValueError as exc:
                 raise RenderError(str(exc)) from exc
     if graphics and (vf is None or suffix):
@@ -3380,8 +3417,12 @@ def _render_segments(
             if reel.graphic_layer is not None:
                 # Final frame after crop and grade; subtitles sit above it.
                 if image_path is not None:
-                    filename = f"layer_{idx}.png"
-                    _stage_graphic_image(ffmpeg_bin,image_path,reel.graphic_layer,tmp_ass_dir/filename)
+                    if reel.graphic_layer.video is not None:
+                        filename = f"layer_{idx}.mp4"
+                        _stage_graphic_video(ffmpeg_bin,image_path,reel.graphic_layer,tmp_ass_dir/filename)
+                    else:
+                        filename = f"layer_{idx}.png"
+                        _stage_graphic_image(ffmpeg_bin,image_path,reel.graphic_layer,tmp_ass_dir/filename)
                     reel_vf = (reel_vf or "null") + _image_layer_filter(
                         reel.graphic_layer,_reel_setup.scale,filename)
                     ass_cwd = str(tmp_ass_dir)
@@ -3965,8 +4006,11 @@ def _render_segments(
                     raise RenderError(str(exc)) from exc
             if image_path is not None:
                 try:
-                    if resolve_image_asset(assets_dir,reel.graphic_layer.image) != image_path:
-                        raise ValueError("local graphic image changed")
+                    actual = (resolve_video_asset(assets_dir,reel.graphic_layer.video)
+                              if reel.graphic_layer.video is not None
+                              else resolve_image_asset(assets_dir,reel.graphic_layer.image))
+                    if actual != image_path:
+                        raise ValueError("local graphic media changed")
                 except ValueError as exc:
                     tmp_out.unlink(missing_ok=True)
                     raise RenderError(str(exc)) from exc
