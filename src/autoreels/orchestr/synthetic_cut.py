@@ -344,7 +344,7 @@ def _graphic(fixture, base, code):
         return base
     if base.graphic is not None:
         raise revisions.Conflict("duplicate graphic layer")
-    layer = revisions.graphic_for(code)
+    fields = revisions.graphic_fields(code)
     _, _, plans, choices = fixture
     parent = _key(base.removed, base.order, base.trim, base.rates,
                   base.crop, base.music, base.dip_ms)
@@ -353,7 +353,7 @@ def _graphic(fixture, base, code):
         digest = hashlib.sha256(choices[key]).hexdigest()
         return next(p for p in plans if p.plan_sha256 == digest)
     source = Manifest.model_validate_json(choices[parent])
-    reel = source.reels[0].model_copy(update={"graphic_layer":layer})
+    reel = source.reels[0].model_copy(update=fields)
     try:
         reel.check_segments()
     except ValueError as exc:
@@ -489,7 +489,7 @@ def preview_graphic(root: Path, enabled: bool, base_revision: int,
     """Read-only, exact current-montage candidate; no persisted draft or asset input."""
     if not enabled:
         raise HTTPException(409,"synthetic editor disabled")
-    if not re.fullmatch(r"[0-9]{1,5}(?:,[0-9]{1,5}){6}",graphic):
+    if not re.fullmatch(r"[0-9]{1,5}(?:,[0-9]{1,5}){6}(?:(?:,[0-9]{1,5}){7}){0,3}",graphic):
         raise HTTPException(422,"invalid graphic parameters")
     state = view(root,enabled)
     if (state.revision != base_revision or state.plan_sha256 != base_plan_sha256

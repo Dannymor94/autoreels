@@ -251,6 +251,12 @@ export function SyntheticCutPreview() {
     equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[])&&equal(p.crop??[],plan.crop??[])&&equal(p.music??[],plan.music??[]));
   const graphic=plan.graphic;
   const customGraphic=graphicDraft??graphic;
+  const splitLayers=(code:number[]|null|undefined)=>code?Array.from({length:code.length/7},(_,i)=>code.slice(i*7,i*7+7)):[];
+  const layers=splitLayers(graphic);
+  const draftLayers=splitLayers(customGraphic);
+  function editLayers(next:number[][]){
+    setGraphicDraft(next.flat());setGraphicError(false);
+  }
   async function applyGraphic(){
     const state=q.data;
     if(!state||!customGraphic||locked||guard.current)return;
@@ -261,7 +267,7 @@ export function SyntheticCutPreview() {
     finally{guard.current=false;setPreviewBusy(false);}
     if(next)changePlan(next);
   }
-  const graphicNames=(code:number[]|null|undefined)=>!code?"Без графики":
+  const graphicNames=(code:number[]|null|undefined)=>!code?"Без графики":code.length>7?("Графические слои: "+code.length/7):
     (code[6]===4?"Тестовый B-roll":code[6]===3?"Тестовое изображение":code[6]===1?"Белый":"Синий")+" · "+code[0]+"%, "+code[1]+"% · "+code[2]+"×"+code[3]+"% · "+seconds(code[4]/1000)+" – "+seconds(code[5]/1000);
   const dip=plan.dip_ms??0;
   const opacity=dip?Math.max(0,...plan.windows.slice(0,-1).map(w=>1-Math.abs(position-w.output_end)/(dip/1000))):0;
@@ -332,11 +338,11 @@ export function SyntheticCutPreview() {
         }}
         onError={()=>{stopMusic();setError(true);setPlaying(false);}} />
       {dip>0&&<div className="cut-dip-overlay" aria-hidden="true" style={{opacity}}/>}
-      {graphic&&position>=graphic[4]/1000&&position<graphic[5]/1000&&<div className="cut-graphic-overlay" aria-hidden="true"
+      {layers.map((graphic,i)=>position>=graphic[4]/1000&&position<graphic[5]/1000&&<div key={i} className="cut-graphic-overlay" aria-hidden="true"
         style={{position:"absolute",left:graphic[0]+"%",top:graphic[1]+"%",width:graphic[2]+"%",height:graphic[3]+"%",background:graphic[6]>=3?"black":graphic[6]===1?"white":"blue",pointerEvents:"none"}}>
         {graphic[6]===3&&<img src="/synthetic-graphic-image.png" alt="" style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>}
         {graphic[6]===4&&<BrollPreview time={position-graphic[4]/1000} playing={playing&&!busy}/>} 
-      </div>}
+      </div>)}
       {!error&&<div className="synthetic-preview-cue">{cue?.text??""}</div>}
     </div>
     <h3>Кадрирование</h3>
@@ -376,18 +382,33 @@ export function SyntheticCutPreview() {
     </label>
     {customGraphic&&<details>
       <summary>Точная настройка слоя</summary>
-      {["X, %","Y, %","Ширина, %","Высота, %","Начало, мс","Конец, мс"].map((label,i)=>
-        <label key={label}>{label}<input type="number" step={1} min={i===2||i===3?5:0}
-          max={i<4?100:Math.floor(plan.duration*1000)}
-          value={customGraphic[i]} disabled={locked}
-          onChange={e=>{const values=[...customGraphic];values[i]=e.currentTarget.valueAsNumber||0;setGraphicDraft(values);setGraphicError(false);}}/></label>)}
+      {draftLayers.map((layer,index)=><fieldset key={index}>
+        <legend>Слой {index+1}</legend>
+        {["X, %","Y, %","Ширина, %","Высота, %","Начало, мс","Конец, мс"].map((label,i)=>
+          <label key={label}>{label}<input type="number" step={1} min={i===2||i===3?5:0}
+            aria-label={draftLayers.length===1?label:"Слой "+(index+1)+" "+label}
+            max={i<4?100:Math.floor(plan.duration*1000)}
+            value={layer[i]} disabled={locked}
+            onChange={e=>editLayers(draftLayers.map((item,j)=>j===index?item.map((n,k)=>k===i?e.currentTarget.valueAsNumber||0:n):item))}/></label>)}
+        {layer[6]<=2&&<label>Цвет<select aria-label={"Цвет слоя "+(index+1)} value={layer[6]} disabled={locked}
+          onChange={e=>editLayers(draftLayers.map((item,j)=>j===index?item.map((n,k)=>k===6?Number(e.currentTarget.value):n):item))}>
+          <option value={1}>Белый</option><option value={2}>Синий</option></select></label>}
+        {draftLayers.length>1&&<>
+          <button type="button" disabled={locked||index===0} onClick={()=>{const next=[...draftLayers];[next[index-1],next[index]]=[next[index],next[index-1]];editLayers(next);}}>Слой {index+1} ниже</button>
+          <button type="button" disabled={locked||index===draftLayers.length-1} onClick={()=>{const next=[...draftLayers];[next[index+1],next[index]]=[next[index],next[index+1]];editLayers(next);}}>Слой {index+1} выше</button>
+          <button type="button" disabled={locked} onClick={()=>editLayers(draftLayers.filter((_,j)=>j!==index))}>Удалить слой {index+1}</button>
+        </>}
+      </fieldset>)}
+      <button type="button" disabled={locked||draftLayers.length>=4||draftLayers.some(layer=>layer[6]>2)||plan.duration<0.1}
+        onClick={()=>editLayers([...draftLayers,[20,10,20,20,0,Math.min(500,Math.floor(plan.duration*1000)),2]])}>Добавить графический слой</button>
+      {graphicDraft&&<button type="button" disabled={locked} onClick={()=>{setGraphicDraft(null);setGraphicError(false);}}>Отменить настройку слоёв</button>}
       <button type="button" disabled={locked||!graphicDraft} onClick={()=>void applyGraphic()}>Применить параметры</button>
       {graphicError&&<p role="alert">Проверь положение, размеры и интервал слоя.</p>}
     </details>}
     <div className="cut-track cut-music" role="img" aria-label="Графический слой на таймлайне">
-      {graphic&&<span style={{left:graphic[4]/1000/plan.duration*100+"%",width:(graphic[5]-graphic[4])/1000/plan.duration*100+"%"}}/>}
+      {layers.map((layer,i)=><span key={i} style={{left:layer[4]/1000/plan.duration*100+"%",width:(layer[5]-layer[4])/1000/plan.duration*100+"%"}}/>)}
     </div>
-    <p className="secondary">Тестовые варианты. Для других изменений монтажа сначала убери графический слой. Отмена и повтор сохраняют слой.</p>
+    <p className="secondary">До четырёх одноцветных слоёв, снизу вверх. Фото и видео пока по одному. Для других изменений монтажа сначала убери слои. Отмена и повтор сохраняют набор.</p>
     <h3>Звуковые дорожки</h3>
     <div className="cut-track-label"><strong>Фоновая дорожка</strong><span>{music?seconds(plan.duration):"Нет"}</span></div>
     <div className="cut-track cut-music" role="img" aria-label="Фоновая дорожка на таймлайне">
