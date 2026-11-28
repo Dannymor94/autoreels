@@ -445,6 +445,8 @@ export interface components {
             crop?: number[] | null;
             /** Dip Ms */
             dip_ms?: number | null;
+            /** Graphic */
+            graphic?: number[] | null;
             /** Music */
             music?: number[] | null;
             /** Navigation */
@@ -492,6 +494,8 @@ export interface components {
             dip_ms?: number | null;
             /** Duration */
             duration: number;
+            /** Graphic */
+            graphic?: number[] | null;
             /** Music */
             music?: number[] | null;
             /** Order */
@@ -515,6 +519,8 @@ export interface components {
             crop?: number[] | null;
             /** Dip Ms */
             dip_ms?: number | null;
+            /** Graphic */
+            graphic?: number[] | null;
             /** Music */
             music?: number[] | null;
             /** Navigation */

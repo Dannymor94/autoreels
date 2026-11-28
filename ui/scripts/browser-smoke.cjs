@@ -44,18 +44,19 @@ async function mock(page, mode = "normal") {
       const quieter={...baseline,music:[1,10,1,1],plan_sha256:"7".repeat(64)};
       const reordered=permutation([1,3,2],"d");
       const dipped={...reordered,dip_ms:200,plan_sha256:"5".repeat(64)};
-      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped];
+      const graphic={...reordered,graphic:[10,10,20,20,0,500,1],plan_sha256:"4".repeat(64)};
+      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic];
       if(method==="PUT"){
         const input=route.request().postDataJSON();
         assert.equal(input.base_revision,cutRevision);
         assert.equal(input.base_plan_sha256,cutSha);
         assert.equal(input.clip_uid,"c".repeat(64));
         const order=input.order??[1,2,3].filter(n=>!input.removed.includes(n));
-        const target=plans.find(p=>JSON.stringify(p.removed)===JSON.stringify(input.removed)&&JSON.stringify(p.order)===JSON.stringify(order)&&JSON.stringify(p.trim??null)===JSON.stringify(input.trim??null)&&JSON.stringify(p.rates??null)===JSON.stringify(input.rates??null)&&JSON.stringify(p.crop??null)===JSON.stringify(input.crop??null)&&JSON.stringify(p.music??null)===JSON.stringify(input.music??null)&&(p.dip_ms??null)===(input.dip_ms??null));
+        const target=plans.find(p=>JSON.stringify(p.removed)===JSON.stringify(input.removed)&&JSON.stringify(p.order)===JSON.stringify(order)&&JSON.stringify(p.trim??null)===JSON.stringify(input.trim??null)&&JSON.stringify(p.rates??null)===JSON.stringify(input.rates??null)&&JSON.stringify(p.crop??null)===JSON.stringify(input.crop??null)&&JSON.stringify(p.music??null)===JSON.stringify(input.music??null)&&(p.dip_ms??null)===(input.dip_ms??null)&&JSON.stringify(p.graphic??null)===JSON.stringify(input.graphic??null));
         assert.ok(target,"mock candidate selection not available");
         assert.equal(input.candidate_plan_sha256,target.plan_sha256);
         cutRemoved=input.removed;cutSha=target.plan_sha256;cutRevision++;
-        cutHistory.unshift({revision:cutRevision,removed:cutRemoved,order:input.order??null,trim:input.trim??null,rates:input.rates??null,crop:input.crop??null,music:input.music??null,dip_ms:input.dip_ms??null,navigation:input.navigation??null,candidate_plan_sha256:cutSha});
+        cutHistory.unshift({revision:cutRevision,removed:cutRemoved,order:input.order??null,trim:input.trim??null,rates:input.rates??null,crop:input.crop??null,music:input.music??null,dip_ms:input.dip_ms??null,graphic:input.graphic??null,navigation:input.navigation??null,candidate_plan_sha256:cutSha});
       }
       return route.fulfill({json:{enabled:mode==="normal",source_duration:3,revision:cutRevision,clip_uid:"c".repeat(64),
         current_removed:cutRemoved,history:cutHistory,plan_sha256:cutSha,
@@ -367,6 +368,20 @@ async function main() {
           assert.equal(await transition.inputValue(),"0");
           await layout(page,"390 transition controls");
           console.log("PASS synthetic dip controls, preview, reload and undo");
+          const graphic=cut.getByRole("combobox",{name:"Графический слой",exact:true});
+          await graphic.selectOption("[10,10,20,20,0,500,1]");
+          await cut.getByText("Ревизия нарезки: 25",{exact:true}).waitFor();
+          await cut.locator(".cut-graphic-overlay").waitFor();
+          await page.reload();
+          await cut.getByText("Ревизия нарезки: 25",{exact:true}).waitFor();
+          assert.equal(await graphic.inputValue(),"[10,10,20,20,0,500,1]");
+          await cut.getByRole("button",{name:"Отменить монтаж",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 26",{exact:true}).waitFor();
+          assert.equal(await graphic.inputValue(),"[]");
+          await cut.getByRole("button",{name:"Повторить монтаж",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 27",{exact:true}).waitFor();
+          assert.equal(await graphic.inputValue(),"[10,10,20,20,0,500,1]");
+          await layout(page,"390 graphic controls");
 
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");

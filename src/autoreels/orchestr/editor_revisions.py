@@ -17,7 +17,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from autoreels.core.models import Crop, Manifest
+from autoreels.core.models import Crop, GraphicLayer, Manifest
 from .synthetic_soundtrack import soundtrack
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -53,6 +53,25 @@ FIXTURE_CROPS = ((18, 30, 60, 100), (0, 30, 60, 100),
                  (18, 60, 60, 100), (24, 40, 48, 80))
 
 
+# Bounded synthetic UI choices: final-frame %, output ms, palette index.
+FIXTURE_GRAPHICS = (
+    (10, 10, 20, 20, 0, 500, 1),
+    (70, 10, 20, 20, 0, 500, 1),
+    (10, 10, 20, 20, 500, 1000, 1),
+    (10, 10, 20, 20, 0, 1000, 2),
+)
+
+
+def graphic_for(code):
+    if code is None:
+        return None
+    if tuple(code) not in FIXTURE_GRAPHICS:
+        raise Conflict("invalid fixture graphic")
+    x, y, w, h, start, end, color = code
+    return GraphicLayer(x_pct=x, y_pct=y, width_pct=w, height_pct=h,
+                        start_ms=start, end_ms=end, color={1:"white",2:"blue"}[color])
+
+
 class FixtureSelection(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
     action: Literal["select-fixture"]
@@ -70,6 +89,7 @@ class FixtureSelection(BaseModel):
     navigation: Literal["undo", "redo"] | None = None
     music: tuple[int, int, int, int] | None = None
     dip_ms: int | None = None
+    graphic: tuple[int, int, int, int, int, int, int] | None = None
 
     @property
     def selection_key(self) -> tuple[int, ...]:
@@ -108,6 +128,9 @@ class FixtureSelection(BaseModel):
             if self.dip_ms not in (100, 200, 300):
                 raise Conflict("invalid fixture transition")
             key = (*key, -5, self.dip_ms)
+        if self.graphic is not None:
+            graphic_for(self.graphic)
+            key = (*key, -6, *self.graphic)
         return key
 
 
@@ -368,6 +391,7 @@ class Store:
                 or candidate.setup != expected_setup
                 or candidate.reels[0].background_track != soundtrack(op.music)
                 or candidate.reels[0].seam_dip_ms != op.dip_ms
+                or candidate.reels[0].graphic_layer != graphic_for(op.graphic)
                 or candidate.model_copy(update={"reels":baseline.reels, "setup":baseline.setup}) != baseline):
             raise Conflict("fixture candidate outside initial manifest")
         candidate.reels[0].check_segments()
