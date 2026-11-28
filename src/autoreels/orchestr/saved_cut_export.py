@@ -22,6 +22,7 @@ from .pathguard import safe_path
 from .synthetic_editor import _MAX_REVISION, _path
 from .synthetic_soundtrack import TRACKS
 from .synthetic_image import IMAGE, IMAGE_NAME
+from .synthetic_video import VIDEO, VIDEO_NAME
 
 PREVIEW_SHA256 = "c87ea2fffefd6d17905ec71cef3ad94659ff1fbee110fb670aab2ac1e43d3848"
 _STEM = "SYNTHETIC_CUT"
@@ -126,6 +127,13 @@ def prepare_saved_cut(editor_root: Path, workspace: Path, public_dir: Path, *,
             raise ValueError("unsupported synthetic graphic image")
         image_raw = _read_fixed(public_dir, IMAGE_NAME, image.sha256)
 
+    video = layer.video if layer is not None else None
+    video_raw = None
+    if video is not None:
+        if video != VIDEO:
+            raise ValueError("unsupported synthetic B-roll")
+        video_raw = _read_fixed(public_dir, VIDEO_NAME, video.sha256)
+
     # All media paths are derived from fixed selectors. The trusted executor
     # owns the workspace exclusively; this is not hostile-local-user isolation.
     source = workspace / "inputs" / manifest.source
@@ -160,7 +168,7 @@ def prepare_saved_cut(editor_root: Path, workspace: Path, public_dir: Path, *,
         raise ValueError("staging changed the edit plan")
     with plan.open("xb") as handle:
         handle.write(raw)
-    if track is not None or image is not None:
+    if track is not None or image is not None or video is not None:
         assets.mkdir()
     if track is not None:
         with (assets / (track.asset.sha256 + ".wav")).open("xb") as handle:
@@ -168,6 +176,9 @@ def prepare_saved_cut(editor_root: Path, workspace: Path, public_dir: Path, *,
     if image is not None:
         with (assets / (image.sha256 + ".png")).open("xb") as handle:
             handle.write(image_raw)
+    if video is not None:
+        with (assets / (video.sha256 + ".mp4")).open("xb") as handle:
+            handle.write(video_raw)
     bound = staged_executor.bind(workspace, job_id=job_id, target_id="synthetic-desktop",
                                  stem=_STEM, clip="r01", gate="ui-editor-export")
     if bound.request.plan_sha256 != _digest(raw):

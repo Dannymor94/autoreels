@@ -46,7 +46,8 @@ async function mock(page, mode = "normal") {
       const dipped={...reordered,dip_ms:200,plan_sha256:"5".repeat(64)};
       const graphic={...reordered,graphic:[10,10,20,20,0,500,1],plan_sha256:"4".repeat(64)};
       const image={...reordered,graphic:[10,10,25,25,0,500,3],plan_sha256:"3".repeat(64)};
-      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image];
+      const broll={...reordered,graphic:[10,10,25,25,0,1000,4],plan_sha256:"2".repeat(64)};
+      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image,broll];
       if(method==="PUT"){
         const input=route.request().postDataJSON();
         assert.equal(input.base_revision,cutRevision);
@@ -390,6 +391,14 @@ async function main() {
           await cut.getByText("Ревизия нарезки: 28",{exact:true}).waitFor();
           assert.equal(await graphic.inputValue(),"[10,10,25,25,0,500,3]");
           await page.waitForFunction(()=>document.querySelector(".cut-graphic-overlay img")?.naturalWidth===36);
+
+          await graphic.selectOption("[10,10,25,25,0,1000,4]");
+          await cut.getByText("Ревизия нарезки: 29",{exact:true}).waitFor();
+          await page.waitForFunction(()=>document.querySelector(".cut-graphic-overlay video")?.videoWidth===36);
+          await page.reload();
+          await cut.getByText("Ревизия нарезки: 29",{exact:true}).waitFor();
+          assert.equal(await graphic.inputValue(),"[10,10,25,25,0,1000,4]");
+          await page.waitForFunction(()=>document.querySelector(".cut-graphic-overlay video")?.videoWidth===36);
 
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");

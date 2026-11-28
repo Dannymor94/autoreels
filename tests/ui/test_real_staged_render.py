@@ -563,7 +563,8 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
     print(f"UI-501/502/503A PASS: dip={dip}; exact soundtrack asset, retained tones, loop, A/V sync, stale and symlink rejection")
 
 
-def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
+@pytest.mark.parametrize("with_broll", [False, True])
+def test_export_exact_saved_editor_revision(tmp_path, monkeypatch, with_broll):
     """Actual editor command -> immutable snapshot -> existing staged renderer."""
     from autoreels.orchestr import saved_cut_export, saved_cut_runner, synthetic_cut, editor_revisions
     editor=tmp_path/"editor"
@@ -603,7 +604,10 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
     view=choose(view,dip,"export-transition")
     from autoreels.orchestr.synthetic_image import IMAGE, IMAGE_NAME
     assert sha(public/IMAGE_NAME)==IMAGE.sha256
-    graphic=next(p for p in view.plans if p.graphic==[10,10,25,25,0,500,3])
+    from autoreels.orchestr.synthetic_video import VIDEO, VIDEO_NAME
+    assert sha(public/VIDEO_NAME)==VIDEO.sha256
+    code=[10,10,25,25,0,1000,4] if with_broll else [10,10,25,25,0,500,3]
+    graphic=next(p for p in view.plans if p.graphic==code)
     view=choose(view,graphic,"export-graphic")
     assert synthetic_cut.view(editor,True)==view
     db_path=editor/".ui-synthetic-editor.sqlite3"
@@ -624,9 +628,13 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
     reel=manifest.reels[0]
     assert [w.word for w in reel.subtitles]==["Продолжение.","Начало."]
     assert reel.background_track.volume==0.2 and reel.seam_dip_ms==200
-    assert reel.graphic_layer.image==IMAGE
     assert reel.graphic_layer.color is None
-    assert sha(stage/"assets"/(IMAGE.sha256+".png"))==IMAGE.sha256
+    if with_broll:
+        assert reel.graphic_layer.video==VIDEO
+        assert sha(stage/"assets"/(VIDEO.sha256+".mp4"))==VIDEO.sha256
+    else:
+        assert reel.graphic_layer.image==IMAGE
+        assert sha(stage/"assets"/(IMAGE.sha256+".png"))==IMAGE.sha256
     assert sha(plan)==prepared.staged_plan_sha256
     with pytest.raises(ValueError):
         saved_cut_export.prepare_saved_cut(editor,stage,public,revision=view.revision,
@@ -648,7 +656,14 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
         # several comparison pixels. Sample the interior, not the letterbox edge.
         right=rgb[80:200,90:105].astype(float)
         assert (left[:,:,0]-left[:,:,2]>120).mean()>0.9
-        assert (right[:,:,2]-right[:,:,0]>120).mean()>0.9
+        if with_broll:
+            assert (right[:,:,0]-right[:,:,2]>120).mean()>0.9
+            frame=run("-v","error","-ss","0.7","-i",output,"-frames:v","1",
+                      "-vf","scale=360:640","-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
+            patch=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)[80:200,55:100].astype(float)
+            assert (patch[:,:,2]-patch[:,:,0]>120).mean()>0.9
+        else:
+            assert (right[:,:,2]-right[:,:,0]>120).mean()>0.9
         assert ledger.get("saved-cut-export")==job
     assert not (stage/"inputs-archive").exists()
     assert sha(db_path)==db_before
