@@ -4,6 +4,7 @@ No owner project files or media reads. Only the isolated demo revision
 store may be written. The map is generated evidence, not transcription.
 """
 import hashlib
+import re
 from itertools import permutations, product
 import sqlite3
 from contextlib import closing
@@ -481,6 +482,35 @@ def view(root: Path, enabled: bool) -> CutDemoView:
             return _view(store,fixture)
     except (sqlite3.Error,OSError,ValueError,revisions.Conflict):
         raise HTTPException(503,"synthetic cut storage unavailable") from None
+
+
+def preview_graphic(root: Path, enabled: bool, base_revision: int,
+                    base_plan_sha256: str, clip_uid: str, graphic: str) -> CutPreview:
+    """Read-only, exact current-montage candidate; no persisted draft or asset input."""
+    if not enabled:
+        raise HTTPException(409,"synthetic editor disabled")
+    if not re.fullmatch(r"[0-9]{1,5}(?:,[0-9]{1,5}){6}",graphic):
+        raise HTTPException(422,"invalid graphic parameters")
+    state = view(root,enabled)
+    if (state.revision != base_revision or state.plan_sha256 != base_plan_sha256
+            or state.clip_uid != clip_uid):
+        raise HTTPException(409,"synthetic cut revision conflict")
+    active = next(p for p in state.plans if p.plan_sha256==state.plan_sha256)
+    order = tuple(active.order)
+    try:
+        op = revisions.FixtureSelection(action="select-fixture",op_id="preview",
+             project_id=_PROJECT,clip_uid=clip_uid,base_revision=base_revision,
+             base_plan_sha256=base_plan_sha256,candidate_plan_sha256=base_plan_sha256,
+             removed=tuple(active.removed),order=order if order!=tuple(sorted(order)) else None,
+             trim=tuple(active.trim) if active.trim is not None else None,
+             rates=tuple(active.rates) if active.rates is not None else None,
+             crop=tuple(active.crop) if active.crop is not None else None,
+             music=tuple(active.music) if active.music is not None else None,
+             dip_ms=active.dip_ms,graphic=tuple(map(int,graphic.split(","))))
+        op.selection_key
+        return _selection(_fixture(),op)
+    except (ValueError,revisions.Conflict):
+        raise HTTPException(409,"graphic incompatible with montage") from None
 
 
 def command(root: Path, enabled: bool, body: CutCommand) -> CutDemoView:

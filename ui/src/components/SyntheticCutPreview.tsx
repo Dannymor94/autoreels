@@ -49,6 +49,9 @@ export function SyntheticCutPreview() {
   const removed=q.data?.current_removed??[];
   const selected=draft??removed;
   const [busy,setBusy]=useState(false);
+  const [graphicDraft,setGraphicDraft]=useState<number[]|null>(null);
+  const [graphicError,setGraphicError]=useState(false);
+  const [previewBusy,setPreviewBusy]=useState(false);
   const [writeError,setWriteError]=useState(false);
   const pending=useRef<CutCommand|null>(null);
   const guard=useRef(false);
@@ -72,7 +75,7 @@ export function SyntheticCutPreview() {
   const wantedOrder=chronological(currentOrder)?kept:
     [...currentOrder.filter(n=>kept.includes(n)),...kept.filter(n=>!currentOrder.includes(n))];
   const candidate=q.data?.plans.find(p=>!p.trim&&!p.rates&&sameCrop(p,plan)&&equal(p.removed,selected)&&equal(p.order,wantedOrder));
-  const locked=busy||writeError||q.isError||q.isFetching||(q.data?.revision??0)>=100;
+  const locked=busy||previewBusy||writeError||q.isError||q.isFetching||(q.data?.revision??0)>=100;
   const usable=!!plan && !!baseline && ready && !error && !q.isError && !busy;
 
   // The background track lives in output time, not source time. It is
@@ -150,7 +153,7 @@ export function SyntheticCutPreview() {
 
   useEffect(()=>{
     const v=video.current;
-    stopMusic();setAudioError(false);
+    stopMusic();setAudioError(false);setGraphicDraft(null);setGraphicError(false);
     if(!plan||!v||!ready||error)return;
     v.pause();setPlaying(false);setPosition(0);activeWindow.current=0;v.playbackRate=rateAt(plan,0);v.currentTime=sourceTime(plan,0);
     const a=audio.current;
@@ -246,6 +249,17 @@ export function SyntheticCutPreview() {
   const graphics=q.data.plans.filter(p=>(p.dip_ms??0)===(plan.dip_ms??0)&&equal(p.removed,removed)&&equal(p.order,plan.order)&&
     equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[])&&equal(p.crop??[],plan.crop??[])&&equal(p.music??[],plan.music??[]));
   const graphic=plan.graphic;
+  const customGraphic=graphicDraft??graphic;
+  async function applyGraphic(){
+    const state=q.data;
+    if(!state||!customGraphic||locked||guard.current)return;
+    guard.current=true;setPreviewBusy(true);setGraphicError(false);
+    let next:CutPreview|undefined;
+    try{next=await api.previewGraphic(state,customGraphic);}
+    catch{setGraphicError(true);}
+    finally{guard.current=false;setPreviewBusy(false);}
+    if(next)changePlan(next);
+  }
   const graphicNames=(code:number[]|null|undefined)=>!code?"Без графики":
     (code[6]===4?"Тестовый B-roll":code[6]===3?"Тестовое изображение":code[6]===1?"Белый":"Синий")+" · "+(code[0]===70?"справа":"слева")+" · "+seconds(code[4]/1000)+" – "+seconds(code[5]/1000);
   const dip=plan.dip_ms??0;
@@ -359,6 +373,16 @@ export function SyntheticCutPreview() {
         {graphics.map(p=><option key={p.plan_sha256} value={JSON.stringify(p.graphic??[])}>{graphicNames(p.graphic)}</option>)}
       </select>
     </label>
+    {customGraphic&&<details>
+      <summary>Точная настройка слоя</summary>
+      {["X, %","Y, %","Ширина, %","Высота, %","Начало, мс","Конец, мс"].map((label,i)=>
+        <label key={label}>{label}<input type="number" step={1} min={i===2||i===3?5:0}
+          max={i<4?100:Math.floor(plan.duration*1000)}
+          value={customGraphic[i]} disabled={locked}
+          onChange={e=>{const values=[...customGraphic];values[i]=e.currentTarget.valueAsNumber||0;setGraphicDraft(values);setGraphicError(false);}}/></label>)}
+      <button type="button" disabled={locked||!graphicDraft} onClick={()=>void applyGraphic()}>Применить параметры</button>
+      {graphicError&&<p role="alert">Проверь положение, размеры и интервал слоя.</p>}
+    </details>}
     <div className="cut-track cut-music" role="img" aria-label="Графический слой на таймлайне">
       {graphic&&<span style={{left:graphic[4]/1000/plan.duration*100+"%",width:(graphic[5]-graphic[4])/1000/plan.duration*100+"%"}}/>}
     </div>

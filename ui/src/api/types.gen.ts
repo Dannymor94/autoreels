@@ -279,6 +279,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/synthetic-cut/graphic-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Synthetic Graphic Preview */
+        get: operations["synthetic_graphic_preview_api_synthetic_cut_graphic_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/synthetic-editor": {
         parameters: {
             query?: never;
@@ -1571,6 +1588,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CutDemoView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    synthetic_graphic_preview_api_synthetic_cut_graphic_preview_get: {
+        parameters: {
+            query: {
+                base_revision: number;
+                base_plan_sha256: string;
+                clip_uid: string;
+                graphic: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CutPreview"];
                 };
             };
             /** @description Validation Error */

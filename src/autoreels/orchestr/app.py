@@ -296,6 +296,12 @@ def synthetic_cut_view():
     return synthetic_cut.view(s.root,s.synthetic_editor)
 
 
+@app.get("/api/synthetic-cut/graphic-preview", response_model=synthetic_cut.CutPreview)
+def synthetic_graphic_preview(base_revision: int, base_plan_sha256: str, clip_uid: str, graphic: str):
+    s = _cfg.settings
+    return synthetic_cut.preview_graphic(s.root,s.synthetic_editor,base_revision,base_plan_sha256,clip_uid,graphic)
+
+
 @app.put("/api/synthetic-cut", response_model=synthetic_cut.CutDemoView)
 def synthetic_cut_command(body: synthetic_cut.CutCommand):
     s = _cfg.settings

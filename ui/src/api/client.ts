@@ -56,6 +56,10 @@ export const api = {
   clipPlan: (stem: string, clip: string) => get<ClipPlanView>(`/api/clip-plan/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}`, true),
   syntheticCut: () => get<CutDemoView>("/api/synthetic-cut",true),
   saveSyntheticCut: (body:CutCommand) => put<CutDemoView>("/api/synthetic-cut",body),
+  previewGraphic: (state:CutDemoView, graphic:number[]) => get<CutPreview>(
+    "/api/synthetic-cut/graphic-preview?"+new URLSearchParams({
+      base_revision:String(state.revision),base_plan_sha256:state.plan_sha256,
+      clip_uid:state.clip_uid,graphic:graphic.join(",")}),true),
   syntheticEditor: () => get<DemoEditorView>("/api/synthetic-editor",true),
   editSynthetic: (body: DemoCommand) => put<DemoEditorView>("/api/synthetic-editor",body),
   health: () => get<HealthResponse>("/api/health"),
