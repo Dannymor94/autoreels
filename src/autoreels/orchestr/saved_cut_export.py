@@ -119,15 +119,15 @@ def prepare_saved_cut(editor_root: Path, workspace: Path, public_dir: Path, *,
         asset_raw = _read_fixed(public_dir, f"synthetic-soundtrack-{TRACKS.index(track.asset)+1}.wav",
                                 track.asset.sha256)
 
-    layer = manifest.reels[0].graphic_layer
-    image = layer.image if layer is not None else None
+    layers = manifest.reels[0].visual_layers()
+    image = next((layer.image for layer in layers if layer.image is not None),None)
     image_raw = None
     if image is not None:
         if image != IMAGE:
             raise ValueError("unsupported synthetic graphic image")
         image_raw = _read_fixed(public_dir, IMAGE_NAME, image.sha256)
 
-    video = layer.video if layer is not None else None
+    video = next((layer.video for layer in layers if layer.video is not None),None)
     video_raw = None
     if video is not None:
         if video != VIDEO:

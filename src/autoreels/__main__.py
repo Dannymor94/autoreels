@@ -4728,12 +4728,13 @@ def cmd_render(
             for r in manifest.reels:
                 if r.background_track is not None:
                     resolve_audio_asset(Path(root).resolve() / "assets", r.background_track.asset)
-                if r.graphic_layer is not None and r.graphic_layer.image is not None:
-                    if r.graphic_layer.image.rights != "synthetic":
-                        raise ValueError("image layer requires an explicitly staged synthetic asset")
-                    resolve_image_asset(Path(root).resolve() / "assets", r.graphic_layer.image)
-                if r.graphic_layer is not None and r.graphic_layer.video is not None:
-                    resolve_video_asset(Path(root).resolve() / "assets", r.graphic_layer.video)
+                for layer in r.visual_layers():
+                    if layer.image is not None:
+                        if layer.image.rights != "synthetic":
+                            raise ValueError("image layer requires an explicitly staged synthetic asset")
+                        resolve_image_asset(Path(root).resolve() / "assets", layer.image)
+                    if layer.video is not None:
+                        resolve_video_asset(Path(root).resolve() / "assets", layer.video)
 
             # Отпечаток определения рила (окна, скорость, заголовок, cold open, кроп, палитра,
             # профиль…). Клип с несовпавшим отпечатком перерендеривается, даже если файл на месте —
@@ -4823,8 +4824,8 @@ def cmd_render(
                 **({"_allow_short_synthetic": True} if _allow_short_synthetic else {}),
                 **({"assets_dir": Path(root).resolve() / "assets"}
                    if any(r.background_track is not None or
-                          (r.graphic_layer is not None and
-                           (r.graphic_layer.image is not None or r.graphic_layer.video is not None))
+                          any(layer.image is not None or layer.video is not None
+                              for layer in r.visual_layers())
                           for r in render_manifest.reels) else {}),
             )
             all_outputs.extend(outputs)

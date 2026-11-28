@@ -1,0 +1,3 @@
+# UI-501N — mixed synthetic visual layer stack
+
+MEDIUM opt-in: existing ordered stack may contain at most one still and one video plus solid rectangles (four layers total). Legacy single-layer serialization and fingerprints unchanged. One common ordered projection, unique filter labels and local staged filenames, exact asset checks before cache reuse, stage binding and after render. Same output clock and soundtrack; no B-roll audio. Saved synthetic export can stage both fixed assets. Existing actual staged test adds overlapping still, moving insert and timed white rectangle, checks pixel ordering, A/V duration, music and both stale assets. No browser stack changes yet, owner media, upload, download, external network, deployment or new dependencies. Exact-head CI.

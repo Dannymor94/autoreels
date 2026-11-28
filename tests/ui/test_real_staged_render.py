@@ -405,7 +405,7 @@ def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
     assert base.setup.crop.model_dump()==dict(x=0,y=0,w=96,h=160)
 
 
-@pytest.mark.parametrize("dip,kind", [(None,"none"),(200,"solid"),(200,"image"),(200,"video"),(200,"stack")])
+@pytest.mark.parametrize("dip,kind", [(None,"none"),(200,"solid"),(200,"image"),(200,"video"),(200,"stack"),(200,"mixed")])
 def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, kind):
     import numpy as np
     from autoreels.core.models import AudioAsset, BackgroundTrack, GraphicLayer, ImageAsset, Segment, VideoAsset
@@ -436,7 +436,7 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
     assert resolve_audio_asset(assets,asset)==path
     track=BackgroundTrack(asset=asset,volume=0.25,fade_seconds=0.0,ducking=False,final_normalize=False)
     image = video = None
-    if kind == "image":
+    if kind in ("image","mixed"):
         png = assets/"test.png"
         run("-v","error","-f","lavfi","-i","color=red:s=36x64",
             "-vf","drawbox=x=18:y=0:w=18:h=64:color=blue:t=fill",
@@ -445,7 +445,7 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
                            rights="synthetic",rights_note="generated in CI")
         image_path = assets/(image.sha256+".png")
         png.rename(image_path)
-    if kind == "video":
+    if kind in ("video","mixed"):
         clip = assets/"test.mp4"
         run("-v","error","-f","lavfi","-i","color=red:s=36x64:r=30:d=0.5",
             "-f","lavfi","-i","color=blue:s=36x64:r=30:d=0.5",
@@ -460,12 +460,21 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
                          start_ms=1000,end_ms=2100,video=video)
     graphic = GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
                            start_ms=1000,end_ms=2000,color=None if image or video else "white",
-                           image=image,video=video) if dip else None
+                           image=image,video=video) if dip and kind!="mixed" else None
     layers = None
     if kind=="stack":
         layers=[graphic,GraphicLayer(x_pct=20,y_pct=10,width_pct=20,height_pct=20,
                                     start_ms=1400,end_ms=1800,color="blue")]
         graphic=None
+    if kind=="mixed":
+        layers=[
+            GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
+                         start_ms=1000,end_ms=2000,image=image),
+            GraphicLayer(x_pct=20,y_pct=10,width_pct=20,height_pct=20,
+                         start_ms=1200,end_ms=2000,video=video),
+            GraphicLayer(x_pct=10,y_pct=10,width_pct=10,height_pct=20,
+                         start_ms=1400,end_ms=1700,color="white"),
+        ]
     if image:
         with pytest.raises(ValueError):
             GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
@@ -543,13 +552,24 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
                 frame=run("-v","error","-ss",str(t),"-i",output,"-frames:v","1",
                           "-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
                 return np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)[80:180,x0:x1].astype(float)
-            # Later blue layer overlaps white, but only in its own interval.
-            assert np.all(patch(1.2,80,100)>230,axis=2).mean()>0.95
-            overlap=patch(1.6,80,100)
-            assert (overlap[:,:,2]-overlap[:,:,0]>120).mean()>0.95
-            assert np.all(patch(1.6,45,65)>230,axis=2).mean()>0.95
-            assert np.all(patch(1.9,80,100)>230,axis=2).mean()>0.95
-            assert np.all(patch(2.5,80,100)>230,axis=2).mean()<0.5
+            if kind=="mixed":
+                def red(p): return float((p[:,:,0]-p[:,:,2]>120).mean())
+                def blue(p): return float((p[:,:,2]-p[:,:,0]>120).mean())
+                # The photo is visible before the movie. Movie covers its
+                # blue half with red, then plays blue. Top white box is timed.
+                assert red(patch(1.1,42,63))>0.95 and blue(patch(1.1,80,100))>0.95
+                assert red(patch(1.3,80,100))>0.95
+                assert np.all(patch(1.5,42,63)>230,axis=2).mean()>0.95
+                assert blue(patch(1.85,80,100))>0.95 and red(patch(1.85,42,63))>0.95
+                assert np.all(patch(2.5,42,63)>230,axis=2).mean()<0.5
+            else:
+                # Later blue layer overlaps white, but only in its own interval.
+                assert np.all(patch(1.2,80,100)>230,axis=2).mean()>0.95
+                overlap=patch(1.6,80,100)
+                assert (overlap[:,:,2]-overlap[:,:,0]>120).mean()>0.95
+                assert np.all(patch(1.6,45,65)>230,axis=2).mean()>0.95
+                assert np.all(patch(1.9,80,100)>230,axis=2).mean()>0.95
+                assert np.all(patch(2.5,80,100)>230,axis=2).mean()<0.5
         observed["sha"]=sha(output)
     with closing(sqlite3.connect(tmp_path/"music-jobs.sqlite")) as db:
         ledger=execution.Ledger(db)

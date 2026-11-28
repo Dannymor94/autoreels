@@ -65,8 +65,8 @@ def bind(root: Path, *, job_id: str, target_id: str, stem: str, clip: str, gate:
         if pipeline_gateway._staged_file_identity(root, path)[0] != digest:
             raise ValueError("staged asset changed")
         files.append(("asset:" + digest, digest))
-    images = [r.graphic_layer.image for r in manifest.reels
-              if r.graphic_layer is not None and r.graphic_layer.image is not None]
+    layers = [layer for r in manifest.reels for layer in r.visual_layers()]
+    images = [layer.image for layer in layers if layer.image is not None]
     for asset in sorted(images,key=lambda a:a.sha256):
         if asset.rights != "synthetic":
             raise ValueError("staged image must be synthetic")
@@ -74,8 +74,7 @@ def bind(root: Path, *, job_id: str, target_id: str, stem: str, clip: str, gate:
         if pipeline_gateway._staged_file_identity(root, path)[0] != asset.sha256:
             raise ValueError("staged image changed")
         files.append(("image:" + asset.sha256, asset.sha256))
-    videos = [r.graphic_layer.video for r in manifest.reels
-              if r.graphic_layer is not None and r.graphic_layer.video is not None]
+    videos = [layer.video for layer in layers if layer.video is not None]
     for asset in sorted(videos,key=lambda a:a.sha256):
         path = resolve_video_asset(root / "assets", asset)
         if pipeline_gateway._staged_file_identity(root, path)[0] != asset.sha256:

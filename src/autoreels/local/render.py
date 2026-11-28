@@ -2951,7 +2951,7 @@ def _graphic_layer_filter(layer: GraphicLayer) -> str:
     )
 
 
-def _image_layer_filter(layer: GraphicLayer, size, filename: str) -> str:
+def _image_layer_filter(layer: GraphicLayer, size, filename: str, index: int = 0) -> str:
     """Compose the trusted local still, keeping aspect ratio inside the box."""
     sw, sh = size
     x, y = sw*layer.x_pct//100, sh*layer.y_pct//100
@@ -2963,10 +2963,10 @@ def _image_layer_filter(layer: GraphicLayer, size, filename: str) -> str:
     shift = f",setpts=PTS-STARTPTS+{layer.start_ms/1000:.3f}/TB" if layer.video is not None else ""
     eof = "pass:repeatlast=0" if layer.video is not None else "repeat"
     return (
-        f"[graphicbase];movie=filename={filename}:format_name={demux}:dec_threads=1,"
+        f"[graphicbase{index}];movie=filename={filename}:format_name={demux}:dec_threads=1,"
         f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1{shift}[graphicimage];"
-        f"[graphicbase][graphicimage]overlay=x={x}:y={y}:eof_action={eof}:"
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1{shift}[graphicimage{index}];"
+        f"[graphicbase{index}][graphicimage{index}]overlay=x={x}:y={y}:eof_action={eof}:"
         f"enable='gte(t,{layer.start_ms/1000:.3f})*lt(t,{layer.end_ms/1000:.3f})'"
     )
 
@@ -3072,18 +3072,17 @@ def _render_segments(
     graphics = [r for r in manifest.reels if r.graphic_layer is not None or r.graphic_layers is not None]
     bound_images = {}
     for reel in graphics:
-        if reel.graphic_layer is None:
-            continue
-        image, video = reel.graphic_layer.image, reel.graphic_layer.video
-        if image is not None or video is not None:
-            asset = image if image is not None else video
-            if assets_dir is None or asset.rights != "synthetic":
-                raise RenderError("media layer requires an explicitly staged synthetic asset")
-            try:
-                bound_images[reel.id] = (resolve_image_asset(assets_dir,image) if image is not None
-                                         else resolve_video_asset(assets_dir,video))
-            except ValueError as exc:
-                raise RenderError(str(exc)) from exc
+        for index,layer in enumerate(reel.visual_layers()):
+            image, video = layer.image, layer.video
+            if image is not None or video is not None:
+                asset = image if image is not None else video
+                if assets_dir is None or asset.rights != "synthetic":
+                    raise RenderError("media layer requires an explicitly staged synthetic asset")
+                try:
+                    bound_images[(reel.id,index)] = (resolve_image_asset(assets_dir,image) if image is not None
+                                                     else resolve_video_asset(assets_dir,video))
+                except ValueError as exc:
+                    raise RenderError(str(exc)) from exc
     if graphics and (vf is None or suffix):
         raise RenderError("graphic layers require final-frame crop rendering")
     special = [r for r in manifest.reels if r.window_rates is not None
@@ -3416,25 +3415,23 @@ def _render_segments(
                 _pts = f"setpts=PTS/{_reel_speed:.4g}"
                 reel_vf = f"{_pts},{reel_vf}" if reel_vf else _pts
             ass_cwd: str | None = None
-            image_path = bound_images.get(reel.id)
-            if reel.graphic_layer is not None:
-                # Final frame after crop and grade; subtitles sit above it.
+            media_layers = []
+            for index,layer in enumerate(reel.visual_layers()):
+                image_path = bound_images.get((reel.id,index))
                 if image_path is not None:
-                    if reel.graphic_layer.video is not None:
-                        filename = f"layer_{idx}.mp4"
-                        _stage_graphic_video(ffmpeg_bin,image_path,reel.graphic_layer,tmp_ass_dir/filename)
+                    media_layers.append((layer,image_path))
+                    if layer.video is not None:
+                        filename = f"layer_{idx}_{index}.mp4"
+                        _stage_graphic_video(ffmpeg_bin,image_path,layer,tmp_ass_dir/filename)
                     else:
-                        filename = f"layer_{idx}.png"
-                        _stage_graphic_image(ffmpeg_bin,image_path,reel.graphic_layer,tmp_ass_dir/filename)
+                        filename = f"layer_{idx}_{index}.png"
+                        _stage_graphic_image(ffmpeg_bin,image_path,layer,tmp_ass_dir/filename)
                     reel_vf = (reel_vf or "null") + _image_layer_filter(
-                        reel.graphic_layer,_reel_setup.scale,filename)
+                        layer,_reel_setup.scale,filename,index)
                     ass_cwd = str(tmp_ass_dir)
                 else:
-                    graphic_vf = _graphic_layer_filter(reel.graphic_layer)
+                    graphic_vf = _graphic_layer_filter(layer)
                     reel_vf = f"{reel_vf},{graphic_vf}" if reel_vf else graphic_vf
-            for layer in reel.graphic_layers or []:
-                graphic_vf = _graphic_layer_filter(layer)
-                reel_vf = f"{reel_vf},{graphic_vf}" if reel_vf else graphic_vf
             _title = getattr(reel, "title_overlay", "") or ""
             _fx_ass = None
             if _fx and (_fx.get("karaoke") or _fx.get("progress") or _fx.get("callouts")):
@@ -3833,7 +3830,7 @@ def _render_segments(
                 _synth_active and _synth_params_dict is not None
                 and _synth_room_start is not None and not reel_fc and not _synth_inline
             )
-            if len(segs) == 1 and rates is None and image_path is None:
+            if len(segs) == 1 and rates is None and not media_layers:
                 if _synth_inline:
                     _sp = _synth_params_dict
                     _tail_s = _sp["tail_sec"]
@@ -4011,11 +4008,11 @@ def _render_segments(
                 except ValueError as exc:
                     tmp_out.unlink(missing_ok=True)
                     raise RenderError(str(exc)) from exc
-            if image_path is not None:
+            for layer,image_path in media_layers:
                 try:
-                    actual = (resolve_video_asset(assets_dir,reel.graphic_layer.video)
-                              if reel.graphic_layer.video is not None
-                              else resolve_image_asset(assets_dir,reel.graphic_layer.image))
+                    actual = (resolve_video_asset(assets_dir,layer.video)
+                              if layer.video is not None
+                              else resolve_image_asset(assets_dir,layer.image))
                     if actual != image_path:
                         raise ValueError("local graphic media changed")
                 except ValueError as exc:
