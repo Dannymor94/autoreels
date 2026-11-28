@@ -617,7 +617,9 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
                   "-vf","scale=360:640","-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
         rgb=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)
         left=rgb[80:200,45:65].astype(float)
-        right=rgb[80:200,95:115].astype(float)
+        # At native 96x160, scaling and 4:2:0 edge chroma spread across
+        # several comparison pixels. Sample the interior, not the letterbox edge.
+        right=rgb[80:200,90:105].astype(float)
         assert (left[:,:,0]-left[:,:,2]>120).mean()>0.9
         assert (right[:,:,2]-right[:,:,0]>120).mean()>0.9
         assert ledger.get("saved-cut-export")==job
