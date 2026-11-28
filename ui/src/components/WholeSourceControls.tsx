@@ -1,6 +1,7 @@
 import {useRef,useState} from "react";
 import {useQuery,useQueryClient} from "@tanstack/react-query";
 import {api,type CutPreview} from "../api/client";
+import { WholeExportControls } from "./WholeExportControls";
 
 const queryKey=["synthetic-whole"];
 const seconds=(n:number)=>n.toFixed(2)+" с";
@@ -60,6 +61,7 @@ export function WholeSourceControls(){
     <button disabled={locked||changed||!state.undo} onClick={()=>state.undo&&void save(state.undo,"undo")}>Отменить очистку</button>
     <button disabled={locked||changed||!state.redo} onClick={()=>state.redo&&void save(state.redo,"redo")}>Повторить очистку</button>
     {failed&&<p role="alert">Не удалось подтвердить сохранение. <button disabled={busy||q.isFetching} onClick={()=>void refresh()}>Обновить состояние</button></p>}
-    <p className="secondary">Это сохранение плана, не запуск рендера. Реальные видео не используются.</p>
+    <WholeExportControls revision={state.revision} digest={state.plan_sha256} disabled={busy||failed||q.isFetching||changed}/>
+    <p className="secondary">Реальные видео не используются.</p>
   </section>;
 }

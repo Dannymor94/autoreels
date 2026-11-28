@@ -822,3 +822,14 @@ def test_whole_source_api_explicit_selection(client,tmp_root):
     assert response.json()["current_removed"]==[2,4]
     assert client.get(path).json()==response.json()
     assert client.get("/api/synthetic-cut").json()["revision"]==0
+
+def test_whole_export_disabled_and_workspace_boundary(client,tmp_root):
+    from autoreels.orchestr.settings import Settings
+    path="/api/synthetic-whole-export"
+    assert client.get(path).json()["status"]=="disabled"
+    assert client.put(path,json={"revision":0,"plan_sha256":"a"*64}).status_code==409
+    assert client.get(path+"/media").status_code==404
+    with pytest.raises(ValueError):
+        Settings(root=tmp_root,synthetic_editor=True,synthetic_export_workspace=tmp_root)
+    with pytest.raises(ValueError):
+        Settings(root=tmp_root,synthetic_export_workspace=tmp_root.parent)

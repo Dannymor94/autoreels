@@ -697,18 +697,29 @@ def test_whole_source_saved_revision_actual_export(tmp_path,monkeypatch):
     with pytest.raises(whole.revisions.Conflict):
         exporter.prepare(editor,stage,revision=0,digest=initial.plan_sha256,job_id="stale")
     assert not (stage/"inputs/DEMO.mp4").exists()
-    prepared=exporter.prepare(editor,stage,revision=state.revision,digest=state.plan_sha256,job_id="whole-export")
+    from fastapi.testclient import TestClient
+    from autoreels.orchestr import settings
+    from autoreels.orchestr.settings import Settings
+    from autoreels.orchestr.app import app
+    monkeypatch.setattr(settings,"settings",Settings(root=editor,synthetic_editor=True,synthetic_export_workspace=stage))
+    client=TestClient(app,base_url="http://127.0.0.1:8765")
+    endpoint="/api/synthetic-whole-export"
+    assert client.get(endpoint).json()["status"]=="ready"
+    assert client.put(endpoint,json={"revision":0,"plan_sha256":initial.plan_sha256}).status_code==409
+    assert client.get(endpoint).json()["status"]=="ready"
+    body={"revision":state.revision,"plan_sha256":state.plan_sha256}
+    response=client.put(endpoint,json=body)
+    assert response.status_code==200,response.text
+    result=response.json()
+    assert result["status"]=="success" and result["editor_revision"]==state.revision
+    assert client.put(endpoint,json=body).json()==result
+    assert client.get(endpoint).json()==result
     source=stage/"inputs/DEMO.mp4"
     source_digest=sha(source)
     plan=stage/"reviews/DEMO.review.json"
     plan_digest=sha(plan)
-    assert prepared.editor_plan_sha256==state.plan_sha256
-    assert prepared.staged_source_sha256==source_digest
-    assert prepared.bound.request.plan_sha256==plan_digest
     assert Manifest.model_validate_json(plan.read_bytes()).model_copy(
         update={"source_sha256":original.source_sha256})==original
-    with pytest.raises(ValueError):
-        exporter.prepare(editor,stage,revision=state.revision,digest=state.plan_sha256,job_id="duplicate")
     tones=exporter.TONES
     observed={}
     def energy(path):
@@ -733,12 +744,12 @@ def test_whole_source_saved_revision_actual_export(tmp_path,monkeypatch):
         assert max(actual[1],actual[3])<0.001*min(actual[0],actual[2],actual[4])
         assert sha(source)==source_digest and sha(plan)==plan_digest
         observed["sha"]=sha(output)
-    with closing(sqlite3.connect(stage/"whole-jobs.sqlite")) as db:
-        ledger=execution.Ledger(db)
-        job=exporter.execute_prepared(prepared,ledger,worker_id="ci-worker",ffprobe=ffprobe)
-        output=stage/"reels-out/DEMO/_gate/ui-whole-export/r01.mp4"
-        validate(output)
-        assert job.status=="success" and job.artifact_sha256==observed["sha"]
+    output=stage/"reels-out/DEMO/_gate/ui-whole-export/r01.mp4"
+    validate(output)
+    assert result["artifact_sha256"]==observed["sha"]
+    download=client.get(endpoint+"/media")
+    assert download.status_code==200 and download.content==output.read_bytes()
+    assert client.put(endpoint,json={"revision":0,"plan_sha256":initial.plan_sha256}).status_code==409
     assert sha(db_path)==db_before and whole.view(editor,True)==state
     assert not (stage/"inputs-archive").exists()
     print(f"UI-504G PASS: 20s -> {target.duration:.3f}s; two confirmed removals, retained tones and immutable saved revision")

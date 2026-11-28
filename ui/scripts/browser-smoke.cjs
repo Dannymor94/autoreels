@@ -24,6 +24,7 @@ async function mock(page, mode = "normal") {
   const jobs = new Map();
   let cutRevision=0,cutRemoved=[],cutHistory=[],cutSha="a".repeat(64);
   let wholeRevision=0,wholeRemoved=[];
+  let exportState={enabled:mode==="normal",status:"ready",editor_revision:null,editor_plan_sha256:null,artifact_sha256:null};
   let editor = {enabled:mode==="normal",revision:0,plan_sha256:"a".repeat(64),clip_uid:"b".repeat(64),
     words:[{index:0,word:"Превет",start:0.1,end:0.8},{index:1,word:"друзья!",start:1,end:2}],
     history:[],undo:null,redo:null};
@@ -31,6 +32,15 @@ async function mock(page, mode = "normal") {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
+    if(path==="/api/synthetic-whole-export"){
+      if(method==="PUT"){
+        const body=route.request().postDataJSON();
+        assert.equal(body.revision,wholeRevision);
+        assert.equal(body.plan_sha256,wholeRemoved.length?"b".repeat(64):"a".repeat(64));
+        exportState={enabled:true,status:"success",editor_revision:body.revision,editor_plan_sha256:body.plan_sha256,artifact_sha256:"f".repeat(64)};
+      }
+      return route.fulfill({json:exportState});
+    }
     if(path==="/api/synthetic-whole"){
       const rows=["Сегодня мы поговорим о внимании.","Сегодня мы поговорим о внимании!","Я хочу вам рассказать...","Я хочу вам рассказать одну историю.","Эту мысль важно сохранить."].map((text,i)=>({number:i+1,text,start_ms:i*4000+200,end_ms:i*4000+2550}));
       const full={removed:[],order:[1,2,3,4,5],duration:20,plan_sha256:"a".repeat(64),windows:[{source_start:0,source_end:20,output_start:0,output_end:20}]};
@@ -247,6 +257,9 @@ async function main() {
           await cut.getByRole("button",{name:"Отменить очистку",exact:true}).click();
           await cut.getByText("Ревизия целого видео: 2",{exact:true}).waitFor();
           assert.equal(await cut.getByRole("checkbox",{name:"Убрать фразу 2",exact:true}).isChecked(),false);
+          await cut.getByRole("button",{name:"Экспортировать сохранённое видео",exact:true}).click();
+          await cut.getByText("Экспорт готов · ревизия 2",{exact:true}).waitFor();
+          assert.equal(await cut.getByRole("link",{name:"Открыть MP4",exact:true}).getAttribute("href"),"/api/synthetic-whole-export/media");
           await cut.getByText("Длинное видео: пример поиска дублей",{exact:true}).click();
           await cut.getByText("Ревизия нарезки: 0",{exact:true}).waitFor();
           await cut.getByRole("button",{name:"Лишнее.",exact:true}).click();

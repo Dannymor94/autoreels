@@ -332,6 +332,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/synthetic-whole-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Synthetic Whole Export View */
+        get: operations["synthetic_whole_export_view_api_synthetic_whole_export_get"];
+        /** Synthetic Whole Export Command */
+        put: operations["synthetic_whole_export_command_api_synthetic_whole_export_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/synthetic-whole-export/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Synthetic Whole Export Media */
+        get: operations["synthetic_whole_export_media_api_synthetic_whole_export_media_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/thumb/{stem}/{clip}": {
         parameters: {
             query?: never;
@@ -673,6 +708,29 @@ export interface components {
             start: number;
             /** Word */
             word: string;
+        };
+        /** ExportCommand */
+        ExportCommand: {
+            /** Plan Sha256 */
+            plan_sha256: string;
+            /** Revision */
+            revision: number;
+        };
+        /** ExportView */
+        ExportView: {
+            /** Artifact Sha256 */
+            artifact_sha256: string | null;
+            /** Editor Plan Sha256 */
+            editor_plan_sha256: string | null;
+            /** Editor Revision */
+            editor_revision: number | null;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "disabled" | "ready" | "reserved" | "queued" | "running" | "cancelling" | "reconcile" | "success" | "empty" | "failed" | "cancelled" | "blocked";
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1790,6 +1848,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    synthetic_whole_export_view_api_synthetic_whole_export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportView"];
+                };
+            };
+        };
+    };
+    synthetic_whole_export_command_api_synthetic_whole_export_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    synthetic_whole_export_media_api_synthetic_whole_export_media_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

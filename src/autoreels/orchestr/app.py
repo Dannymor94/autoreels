@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, plan_view, queue, render_targets, reviews, sourcemeta, synthetic_cut, synthetic_editor, synthetic_whole
+from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, plan_view, queue, render_targets, reviews, sourcemeta, synthetic_cut, synthetic_editor, synthetic_whole, whole_export_http
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 from .security import AccessBoundary
 from .pathguard import safe_path
@@ -317,3 +317,17 @@ def synthetic_whole_view():
 def synthetic_whole_command(body: synthetic_whole.WholeCommand):
     s = _cfg.settings
     return synthetic_whole.command(s.root,s.synthetic_editor,body)
+
+@app.get("/api/synthetic-whole-export", response_model=whole_export_http.ExportView)
+def synthetic_whole_export_view():
+    return whole_export_http.view(_cfg.settings)
+
+
+@app.put("/api/synthetic-whole-export", response_model=whole_export_http.ExportView)
+def synthetic_whole_export_command(body: whole_export_http.ExportCommand):
+    return whole_export_http.command(_cfg.settings,body)
+
+
+@app.get("/api/synthetic-whole-export/media")
+def synthetic_whole_export_media():
+    return media_response(whole_export_http.artifact(_cfg.settings))

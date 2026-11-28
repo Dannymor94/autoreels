@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--synthetic-jobs", action="store_true", help="Enable isolated synthetic queue only")
     parser.add_argument("--synthetic-editor", action="store_true", help="Enable fixed synthetic subtitle editor only")
+    parser.add_argument("--synthetic-export-workspace", type=Path, help="One-shot local synthetic whole-video export workspace, opt-in")
     parser.add_argument("--private-origin", help="Exact private HTTPS origin, opt-in")
     parser.add_argument("--owner-digest-file", help="Local 0600 file containing SHA-256 of random owner password")
     args = parser.parse_args()
@@ -24,7 +25,8 @@ def main():
     try:
         _s.settings = Settings.from_env(root_override=args.root, port=args.port, no_browser=args.no_browser,
                                        private_origin=args.private_origin, owner_digest_file=args.owner_digest_file,
-                                       synthetic_jobs=args.synthetic_jobs, synthetic_editor=args.synthetic_editor)
+                                       synthetic_jobs=args.synthetic_jobs, synthetic_editor=args.synthetic_editor,
+                                       synthetic_export_workspace=args.synthetic_export_workspace)
     except (ValueError, OSError):
         parser.error("invalid private access configuration")
 
