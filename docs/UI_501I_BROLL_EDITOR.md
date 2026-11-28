@@ -1,0 +1,3 @@
+# UI-501I — B-roll in the synthetic editor
+
+Use the existing layer selector, CAS and undo history. One generated video-only H.264 fixture, exactly one second, red then blue. Browser preview is approximate and muted, synchronized to output time and paused with the main montage. The existing saved-export staging verifies the exact bundled bytes and passes the same immutable plan to the local renderer. Browser smoke covers selection, loaded video and reload; existing end-to-end render test covers both still and moving layers, color order and main soundtrack. No user media, arbitrary upload, external network, new dependency or production deployment. Exact-head CI.
