@@ -66,8 +66,9 @@ async function mock(page, mode = "normal") {
       const image={...reordered,graphic:[10,10,25,25,0,500,3],plan_sha256:"3".repeat(64)};
       const broll={...reordered,graphic:[10,10,25,25,0,1000,4],plan_sha256:"2".repeat(64)};
       const custom={...broll,graphic:[23,10,25,25,0,1000,4],plan_sha256:"1".repeat(64)};
-      const stack={...graphic,graphic:[...graphic.graphic,20,10,20,20,0,500,2],plan_sha256:"6".repeat(64)};
+      const stack={...graphic,graphic:[...graphic.graphic,20,10,20,20,0,500,2],plan_sha256:"0".repeat(64)};
       const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image,broll,custom,stack];
+      assert.equal(new Set(plans.map(p=>p.plan_sha256)).size,plans.length,"mock plan digests must be distinct");
       if(path.endsWith("/graphic-preview")){
         assert.equal(url.searchParams.get("base_revision"),String(cutRevision));
         assert.equal(url.searchParams.get("base_plan_sha256"),cutSha);
