@@ -448,7 +448,7 @@ async function main() {
           await cut.getByRole("button",{name:"Добавить графический слой",exact:true}).click();
           await cut.getByRole("button",{name:"Применить параметры",exact:true}).click();
           await cut.getByText("Ревизия нарезки: 32",{exact:true}).waitFor();
-          await cut.getByText("Графические слои: 2",{exact:true}).waitFor();
+          assert.equal(await graphic.inputValue(),"[10,10,20,20,0,500,1,20,10,20,20,0,500,2]");
           await page.waitForFunction(()=>document.querySelectorAll(".cut-graphic-overlay").length===2);
           await page.reload();
           await cut.getByText("Ревизия нарезки: 32",{exact:true}).waitFor();
