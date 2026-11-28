@@ -242,3 +242,45 @@ def test_whole_source_preserves_edges_and_only_confirmed_interior_cuts():
     ambiguous["words"][1]["audible_end"]=3.4
     with pytest.raises(edit.Unavailable):
         propose_whole_source(sentences,confirmed=(2,),**{**args,"smap":ambiguous})
+
+
+def test_grounded_insert_proposals_use_retained_output_clock():
+    import hashlib
+    from autoreels.core.models import Crop, Manifest, Segment, SetupProfile, ImageAsset, VideoAsset
+    from autoreels.orchestr.broll_proposals import InsertSuggestion, review_inserts
+    from autoreels.orchestr.longform_review import build_review
+    words=[Word(word=f"Фраза{i}.",t0=float(t),t1=t+0.9) for i,t in enumerate((1,3,5),1)]
+    sentences=[[w] for w in words]
+    smap={"words":[{"idx":i,"t0":w.t0,"t1":w.t1,"audible_start":w.t0+0.2,
+                    "audible_end":w.t0+0.8} for i,w in enumerate(words)],"boundaries":[]}
+    base=Reel(id="r01",start=0,end=7,score=80,hook="",title="",description="",
+              planned=True,reordered=True,segments=[Segment(start=4,end=7),Segment(start=0,end=2)],
+              window_rates=[0.5,1.0])
+    manifest=Manifest(source="DEMO.mp4",source_sha256="b"*64,duration_preset="shorts",run_key="insert-fixture",
+        setup=SetupProfile(setup_id="fixture",crop=Crop(x=0,y=0,w=96,h=160),frame=[96,160],scale=[96,160]),
+        reels=[base])
+    image=ImageAsset(sha256="c"*64,label="test still",width=36,height=64,rights="synthetic",rights_note="test")
+    video=VideoAsset(sha256="d"*64,label="test movie",width=36,height=64,duration_ms=1000,
+                     rights="synthetic",rights_note="test")
+    before=manifest.model_dump_json()
+    def suggest(n,asset):
+        return InsertSuggestion(sentence=n,asset_sha256=asset.sha256)
+    args=dict(clip_id="r01",plan_sha256=hashlib.sha256(before.encode()).hexdigest(),
+              review_sha256=build_review(sentences,8000).review_sha256,sentences=sentences,
+              words=words,smap=smap,source_duration_ms=8000,catalog=[image,video],
+              suggestions=[suggest(3,video),suggest(1,image),suggest(2,image),suggest(3,video)])
+    review=review_inserts(manifest,**args)
+    assert [(p.layer.start_ms,p.layer.end_ms) for p in review.accepted]==[(2400,3400),(7200,7800)]
+    assert [reason for _,reason in review.rejected]==["speech not uniquely retained","duplicate suggestion"]
+    assert review_inserts(manifest,**args)==review
+    assert manifest.model_dump_json()==before
+    assert manifest.reels[0].visual_layers()==[]
+    with pytest.raises(edit.Unavailable,match="revision changed"):
+        review_inserts(manifest,**{**args,"plan_sha256":"0"*64})
+    with pytest.raises(edit.Unavailable,match="ambiguous visual"):
+        review_inserts(manifest,**{**args,"catalog":[image,image]})
+    conflict=review_inserts(manifest,**{**args,"min_gap_ms":5000})
+    assert len(conflict.accepted)==1
+    assert conflict.rejected[0][1]=="conflict with existing or proposed layer"
+    unknown=review_inserts(manifest,**{**args,"suggestions":[InsertSuggestion(sentence=1,asset_sha256="0"*64)]})
+    assert unknown.accepted==() and unknown.rejected[0][1]=="asset unavailable or not enabled"
