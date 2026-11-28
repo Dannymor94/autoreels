@@ -393,6 +393,7 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     disabled = client.get("/api/synthetic-cut").json()
     assert disabled["enabled"] is False and disabled["soundtracks"] == []
     assert disabled["visual_assets"]==[]
+    assert disabled["insert_options"]==[]
     assert disabled["longform_review"] is None
     settings.settings = Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
     response = client.get("/api/synthetic-cut")
@@ -896,3 +897,30 @@ def test_register_bundled_media_in_local_library(tmp_path):
     assert register_fixture_assets(root,public)==expected
     assert register_fixture_assets(root,public)==expected
     assert list_assets(root)==expected
+
+def test_demo_insert_option_requires_explicit_current_revision_commit(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    path="/api/synthetic-cut"
+    initial=client.get(path).json()
+    assert initial["revision"]==0 and initial["insert_options"]
+    option=next(o for o in initial["insert_options"] if o["asset_number"]==3)
+    assert option["sentence"]==1 and option["end_ms"]>option["start_ms"]
+    assert client.get(path).json()==initial
+    assert not (tmp_root/".ui-synthetic-editor.sqlite3").exists()
+    params=dict(base_revision=0,base_plan_sha256=initial["plan_sha256"],clip_uid=initial["clip_uid"],
+                graphic=",".join(map(str,option["graphic"])))
+    candidate=client.get(path+"/graphic-preview",params=params)
+    assert candidate.status_code==200,candidate.text
+    target=candidate.json()
+    assert client.get(path).json()==initial
+    body=dict(op_id="accept-insert",base_revision=0,base_plan_sha256=initial["plan_sha256"],
+        clip_uid=initial["clip_uid"],candidate_plan_sha256=target["plan_sha256"],removed=target["removed"],
+        graphic=target["graphic"])
+    response=client.put(path,json=body)
+    assert response.status_code==200,response.text
+    saved=response.json()
+    assert saved["revision"]==1 and saved["history"][0]["graphic"]==option["graphic"]
+    assert all(o["asset_number"]!=3 for o in saved["insert_options"])
+    assert client.get(path+"/graphic-preview",params=params).status_code==409

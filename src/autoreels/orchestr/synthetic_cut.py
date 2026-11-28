@@ -22,7 +22,8 @@ from . import sentence_edit, editor_revisions as revisions
 from .synthetic_editor import _path, _MAX_REVISION
 from .synthetic_soundtrack import TRACKS, soundtrack
 from .synthetic_asset_catalog import VISUAL_ASSETS
-from .longform_review import LongformReview, synthetic_review
+from .longform_review import LongformReview, build_review, synthetic_review
+from .broll_proposals import InsertSuggestion, review_inserts
 
 _PROJECT = "synthetic-cut-v1"
 
@@ -89,6 +90,14 @@ def _visual_catalog() -> list[CutSoundtrackAsset]:
             for number,asset in VISUAL_ASSETS]
 
 
+class CutInsertOption(BaseModel):
+    sentence: int
+    asset_number: int
+    start_ms: int
+    end_ms: int
+    graphic: list[int]
+
+
 class CutDemoView(BaseModel):
     enabled: bool
     source_duration: float
@@ -101,6 +110,7 @@ class CutDemoView(BaseModel):
     history: list[CutSelectionEvent]
     soundtracks: list[CutSoundtrackAsset]
     visual_assets: list[CutSoundtrackAsset]
+    insert_options: list[CutInsertOption]
     longform_review: LongformReview | None
 
 
@@ -159,13 +169,44 @@ def _projection(segments, removed, order, raw, trim=None, rates=None):
                       rates=list(rates) if rates is not None else None)
 
 
-def _fixture():
-    duration = 3.0
+def _fixture_speech():
     words = [Word(word=text, t0=float(i), t1=i+0.9)
              for i, text in enumerate(("Начало.", "Лишнее.", "Продолжение."))]
     sentences = [[w] for w in words]
     smap = {"words":[{"idx":i,"t0":w.t0,"t1":w.t1,"audible_start":i+0.2,
                       "audible_end":i+0.8} for i,w in enumerate(words)], "boundaries":[]}
+    return words,sentences,smap
+
+
+def _insert_options(head,active):
+    """Fixed demo suggestions, not semantic model output; independent alternatives."""
+    words,sentences,smap=_fixture_speech()
+    catalog=dict(VISUAL_ASSETS)
+    review=build_review(sentences,3000)
+    manifest=head.manifest()
+    options=[]
+    for number,sentence in ((3,1),(4,3)):
+        result=review_inserts(manifest,clip_id="r01",plan_sha256=head.plan_sha256,
+            review_sha256=review.review_sha256,sentences=sentences,words=words,smap=smap,
+            source_duration_ms=3000,catalog=list(catalog.values()),
+            suggestions=[InsertSuggestion(sentence=sentence,asset_sha256=catalog[number].sha256)])
+        for proposal in result.accepted:
+            layer=proposal.layer
+            code=[*active.graphic] if active.graphic else []
+            code.extend([layer.x_pct,layer.y_pct,layer.width_pct,layer.height_pct,
+                         layer.start_ms,layer.end_ms,number])
+            if code[0]==1000:
+                code.extend([100,100])
+            # Proposals use the existing exact candidate command, never apply here.
+            revisions.graphic_fields(tuple(code))
+            options.append(CutInsertOption(sentence=sentence,asset_number=number,
+                start_ms=layer.start_ms,end_ms=layer.end_ms,graphic=code))
+    return options
+
+
+def _fixture():
+    duration = 3.0
+    words,sentences,smap=_fixture_speech()
     params = ManualPlanParams()
     order = (1,2,3)
     args = dict(sentences=sentences, words=words, smap=smap,
@@ -458,7 +499,7 @@ def _view(store, fixture):
         return CutDemoView(enabled=True,source_duration=duration,sentences=sentences,
             plans=plans,revision=head.number,plan_sha256=head.plan_sha256,
             clip_uid=dict(head.clip_uids)["r01"],current_removed=active.removed,
-            soundtracks=_soundtrack_catalog(),visual_assets=_visual_catalog(),longform_review=synthetic_review(),
+            soundtracks=_soundtrack_catalog(),visual_assets=_visual_catalog(),insert_options=_insert_options(head,active),longform_review=synthetic_review(),
             history=[CutSelectionEvent(revision=i,removed=list(op.removed),
                                        order=list(op.order) if op.order is not None else None,
                                        trim=list(op.trim) if op.trim is not None else None,
@@ -475,7 +516,7 @@ def _view(store, fixture):
 def view(root: Path, enabled: bool) -> CutDemoView:
     if not enabled:
         return CutDemoView(enabled=False,source_duration=0,sentences=[],plans=[],
-            revision=0,plan_sha256="",clip_uid="",current_removed=[],history=[],soundtracks=[],visual_assets=[],longform_review=None)
+            revision=0,plan_sha256="",clip_uid="",current_removed=[],history=[],soundtracks=[],visual_assets=[],insert_options=[],longform_review=None)
     try:
         fixture = _fixture()
         path = _path(root)

@@ -389,6 +389,15 @@ export function SyntheticCutPreview() {
       {dip>0&&plan.windows.slice(0,-1).map((w,i)=><span key={i} style={{left:((w.output_end-dip/1000)/plan.duration*100)+"%",width:(2*dip/1000/plan.duration*100)+"%"}}/>)}
     </div>
     <p className="secondary">Затемнение не меняет длительность, звук или время субтитров. Для несовместимых коротких фрагментов сначала отключи переход.</p>
+    <h3>Предложения вставок</h3>
+    <p className="secondary">Фиксированные тестовые предложения, не результат ИИ. Интервал рассчитан по карте речи текущего монтажа.</p>
+    {!q.data.insert_options.length&&<p className="secondary">Нет совместимых предложений.</p>}
+    {q.data.insert_options.map(option=><div key={option.asset_number}>
+      <strong>{option.asset_number===3?"Фото":"B-roll"} · фраза {option.sentence}</strong>
+      <p>{q.data!.sentences.find(s=>s.number===option.sentence)?.text} · {seconds(option.start_ms/1000)} – {seconds(option.end_ms/1000)}</p>
+      <button disabled={locked||!!graphicDraft} onClick={()=>void applyGraphic(option.graphic)}>
+        Принять вставку · {option.asset_number===3?"PNG":"MP4"}</button>
+    </div>)}
     <h3>Библиотека медиа</h3>
     <p className="secondary">Встроенные тестовые материалы. Личные файлы не загружаются.</p>
     <div className="media-catalog">

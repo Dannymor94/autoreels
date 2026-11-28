@@ -507,6 +507,8 @@ export interface components {
             enabled: boolean;
             /** History */
             history: components["schemas"]["CutSelectionEvent"][];
+            /** Insert Options */
+            insert_options: components["schemas"]["CutInsertOption"][];
             longform_review: components["schemas"]["LongformReview"] | null;
             /** Plan Sha256 */
             plan_sha256: string;
@@ -522,6 +524,19 @@ export interface components {
             source_duration: number;
             /** Visual Assets */
             visual_assets: components["schemas"]["CutSoundtrackAsset"][];
+        };
+        /** CutInsertOption */
+        CutInsertOption: {
+            /** Asset Number */
+            asset_number: number;
+            /** End Ms */
+            end_ms: number;
+            /** Graphic */
+            graphic: number[];
+            /** Sentence */
+            sentence: number;
+            /** Start Ms */
+            start_ms: number;
         };
         /** CutPreview */
         CutPreview: {
