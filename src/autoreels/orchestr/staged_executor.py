@@ -53,7 +53,7 @@ def bind(root: Path, *, job_id: str, target_id: str, stem: str, clip: str, gate:
     plan = root / "reviews" / (stem + ".review.json")
     plan_sha = pipeline_gateway._staged_file_identity(root, plan)[0]
     from autoreels.core.models import Manifest
-    from autoreels.local.assets import resolve_audio_asset
+    from autoreels.local.assets import resolve_audio_asset, resolve_image_asset
     raw = plan.read_bytes()
     if hashlib.sha256(raw).hexdigest() != plan_sha:
         raise ValueError("staged plan changed")
@@ -65,6 +65,15 @@ def bind(root: Path, *, job_id: str, target_id: str, stem: str, clip: str, gate:
         if pipeline_gateway._staged_file_identity(root, path)[0] != digest:
             raise ValueError("staged asset changed")
         files.append(("asset:" + digest, digest))
+    images = [r.graphic_layer.image for r in manifest.reels
+              if r.graphic_layer is not None and r.graphic_layer.image is not None]
+    for asset in sorted(images,key=lambda a:a.sha256):
+        if asset.rights != "synthetic":
+            raise ValueError("staged image must be synthetic")
+        path = resolve_image_asset(root / "assets", asset)
+        if pipeline_gateway._staged_file_identity(root, path)[0] != asset.sha256:
+            raise ValueError("staged image changed")
+        files.append(("image:" + asset.sha256, asset.sha256))
     snapshot = json.dumps(
         {"version": "fixture-v1", "profile": "h264", "encoder": "libx264",
          "archive_source": False, "pull_first": False, "fallback": False,

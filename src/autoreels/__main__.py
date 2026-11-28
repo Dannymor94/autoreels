@@ -4722,11 +4722,14 @@ def cmd_render(
             zoom_on = render_cfg.zoom.enabled if zoom is None else zoom
             # Explicit layer must be available even when a prior artifact is
             # eligible for reuse. Never substitute a random or missing track.
-            if any(r.background_track is not None for r in manifest.reels):
-                from autoreels.local.assets import resolve_audio_asset
-                for r in manifest.reels:
-                    if r.background_track is not None:
-                        resolve_audio_asset(Path(root).resolve() / "assets", r.background_track.asset)
+            from autoreels.local.assets import resolve_audio_asset, resolve_image_asset
+            for r in manifest.reels:
+                if r.background_track is not None:
+                    resolve_audio_asset(Path(root).resolve() / "assets", r.background_track.asset)
+                if r.graphic_layer is not None and r.graphic_layer.image is not None:
+                    if r.graphic_layer.image.rights != "synthetic":
+                        raise ValueError("image layer requires an explicitly staged synthetic asset")
+                    resolve_image_asset(Path(root).resolve() / "assets", r.graphic_layer.image)
 
             # Отпечаток определения рила (окна, скорость, заголовок, cold open, кроп, палитра,
             # профиль…). Клип с несовпавшим отпечатком перерендеривается, даже если файл на месте —
@@ -4815,7 +4818,9 @@ def cmd_render(
                 subtitles_cfg=subtitles_cfg, background=background, smap=_render_smap,
                 **({"_allow_short_synthetic": True} if _allow_short_synthetic else {}),
                 **({"assets_dir": Path(root).resolve() / "assets"}
-                   if any(r.background_track is not None for r in render_manifest.reels) else {}),
+                   if any(r.background_track is not None or
+                          (r.graphic_layer is not None and r.graphic_layer.image is not None)
+                          for r in render_manifest.reels) else {}),
             )
             all_outputs.extend(outputs)
             # Record each rendered clip's fingerprint next to it, so a later run re-renders only when

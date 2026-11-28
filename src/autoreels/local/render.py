@@ -17,6 +17,7 @@ r"""R1a — нарезка без кропа: manifest → reels-out/<id>_raw.mp
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import shutil
@@ -39,7 +40,7 @@ from autoreels.core.calibration import face_close_crop
 from autoreels.core.models import Crop, GraphicLayer, Manifest, Segment, SetupProfile
 from autoreels.core.playback_timing import build_window_timing
 from autoreels.local.subtitles import build_ass, remap_to_output
-from autoreels.local.assets import resolve_audio_asset
+from autoreels.local.assets import resolve_audio_asset, resolve_image_asset
 from autoreels.local.fx import output_time as fx_output_time, plate_start, punch_point, punch_times, push_vf
 from autoreels.local.fx import timeline as fx_timeline
 from autoreels.local.fx import whoosh_cmd, whoosh_wav_cmd
@@ -2950,6 +2951,39 @@ def _graphic_layer_filter(layer: GraphicLayer) -> str:
     )
 
 
+def _image_layer_filter(layer: GraphicLayer, size, filename: str) -> str:
+    """Compose the trusted local still, keeping aspect ratio inside the box."""
+    sw, sh = size
+    x, y = sw*layer.x_pct//100, sh*layer.y_pct//100
+    w, h = sw*layer.width_pct//100, sh*layer.height_pct//100
+    if w < 2 or h < 2:
+        raise RenderError("image box too small for output frame")
+    # Filename is generated internally in a private temporary directory.
+    return (
+        f"[graphicbase];movie=filename={filename}:format_name=image2:dec_threads=1,"
+        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[graphicimage];"
+        f"[graphicbase][graphicimage]overlay=x={x}:y={y}:eof_action=repeat:"
+        f"enable='gte(t,{layer.start_ms/1000:.3f})*lt(t,{layer.end_ms/1000:.3f})'"
+    )
+
+
+def _stage_graphic_image(ffmpeg_bin: str, source: Path, layer: GraphicLayer, destination: Path) -> None:
+    # Trusted synthetic assets only, verify the copied bytes before decoding.
+    raw = source.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != layer.image.sha256:
+        raise RenderError("graphic image changed during staging")
+    with destination.open("xb") as handle:
+        handle.write(raw)
+    try:
+        subprocess.run([ffmpeg_bin,"-v","error","-xerror","-nostdin",
+                        "-f","image2","-c:v","png","-threads","1","-i",str(destination),
+                        "-frames:v","1","-f","null","-"],
+                       check=True,capture_output=True,timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RenderError("graphic image decode failed") from exc
+
+
 def _render_segments(
     manifest: Manifest,
     *,
@@ -3001,6 +3035,16 @@ def _render_segments(
             except ValueError as exc:
                 raise RenderError(str(exc)) from exc
     graphics = [r for r in manifest.reels if r.graphic_layer is not None]
+    bound_images = {}
+    for reel in graphics:
+        image = reel.graphic_layer.image
+        if image is not None:
+            if assets_dir is None or image.rights != "synthetic":
+                raise RenderError("image layer requires an explicitly staged synthetic asset")
+            try:
+                bound_images[reel.id] = resolve_image_asset(assets_dir, image)
+            except ValueError as exc:
+                raise RenderError(str(exc)) from exc
     if graphics and (vf is None or suffix):
         raise RenderError("graphic layers require final-frame crop rendering")
     special = [r for r in manifest.reels if r.window_rates is not None
@@ -3331,12 +3375,19 @@ def _render_segments(
             if _reel_speed != 1.0:
                 _pts = f"setpts=PTS/{_reel_speed:.4g}"
                 reel_vf = f"{_pts},{reel_vf}" if reel_vf else _pts
-            if reel.graphic_layer is not None:
-                # The final frame already has the source crop and palette.
-                # Subtitles are composed above the graphic.
-                graphic_vf = _graphic_layer_filter(reel.graphic_layer)
-                reel_vf = f"{reel_vf},{graphic_vf}" if reel_vf else graphic_vf
             ass_cwd: str | None = None
+            image_path = bound_images.get(reel.id)
+            if reel.graphic_layer is not None:
+                # Final frame after crop and grade; subtitles sit above it.
+                if image_path is not None:
+                    filename = f"layer_{idx}.png"
+                    _stage_graphic_image(ffmpeg_bin,image_path,reel.graphic_layer,tmp_ass_dir/filename)
+                    reel_vf = (reel_vf or "null") + _image_layer_filter(
+                        reel.graphic_layer,_reel_setup.scale,filename)
+                    ass_cwd = str(tmp_ass_dir)
+                else:
+                    graphic_vf = _graphic_layer_filter(reel.graphic_layer)
+                    reel_vf = f"{reel_vf},{graphic_vf}" if reel_vf else graphic_vf
             _title = getattr(reel, "title_overlay", "") or ""
             _fx_ass = None
             if _fx and (_fx.get("karaoke") or _fx.get("progress") or _fx.get("callouts")):
@@ -3734,7 +3785,7 @@ def _render_segments(
                 _synth_active and _synth_params_dict is not None
                 and _synth_room_start is not None and not reel_fc and not _synth_inline
             )
-            if len(segs) == 1 and rates is None:
+            if len(segs) == 1 and rates is None and image_path is None:
                 if _synth_inline:
                     _sp = _synth_params_dict
                     _tail_s = _sp["tail_sec"]
@@ -3909,6 +3960,13 @@ def _render_segments(
                 try:
                     if resolve_audio_asset(assets_dir, track.asset) != music_path:
                         raise ValueError("local soundtrack changed")
+                except ValueError as exc:
+                    tmp_out.unlink(missing_ok=True)
+                    raise RenderError(str(exc)) from exc
+            if image_path is not None:
+                try:
+                    if resolve_image_asset(assets_dir,reel.graphic_layer.image) != image_path:
+                        raise ValueError("local graphic image changed")
                 except ValueError as exc:
                     tmp_out.unlink(missing_ok=True)
                     raise RenderError(str(exc)) from exc
