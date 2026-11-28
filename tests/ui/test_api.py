@@ -778,3 +778,29 @@ def test_custom_graphic_preview_and_exact_commit(client,tmp_root):
     assert result.json()["plan_sha256"]==target["plan_sha256"]
     assert client.get("/api/synthetic-cut").json()==result.json()
     assert client.get(path,params=params).status_code==409
+
+def test_whole_source_separate_revision_store(tmp_root):
+    from fastapi import HTTPException
+    from autoreels.orchestr import synthetic_whole as whole, synthetic_cut
+    initial=whole.view(tmp_root,True)
+    assert initial.plans[0].duration==20
+    assert not (tmp_root/".ui-synthetic-editor.sqlite3").exists()
+    assert not whole.view(tmp_root,False).enabled
+    target=next(p for p in initial.plans if p.removed==[2,3])
+    def choose(state,p,op_id,navigation=None):
+        return whole.command(tmp_root,True,whole.WholeCommand(
+            op_id=op_id,base_revision=state.revision,base_plan_sha256=state.plan_sha256,
+            clip_uid=state.clip_uid,candidate_plan_sha256=p.plan_sha256,
+            removed=p.removed,navigation=navigation))
+    saved=choose(initial,target,"whole-cut")
+    assert saved.revision==1 and saved.current_removed==[2,3]
+    assert whole.view(tmp_root,True)==saved
+    assert synthetic_cut.view(tmp_root,True).revision==0
+    assert whole.snapshot(tmp_root,1,saved.plan_sha256).manifest().reels[0].playback_duration()==pytest.approx(target.duration)
+    with pytest.raises(HTTPException) as exc:
+        choose(initial,target,"stale-whole")
+    assert exc.value.status_code==409
+    restored=choose(saved,saved.undo,"undo-whole","undo")
+    assert restored.current_removed==[]
+    redone=choose(restored,restored.redo,"redo-whole","redo")
+    assert redone.current_removed==[2,3] and redone.plan_sha256==saved.plan_sha256

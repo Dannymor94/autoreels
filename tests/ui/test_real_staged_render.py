@@ -671,3 +671,82 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch, with_broll):
     assert sha(plan)==prepared.staged_plan_sha256
     assert sha(public/"synthetic-editor-preview.mp4")==prepared.preview_sha256
     print("UI-504A PASS: saved revision 5, cut+reorder+crop+music+dip+graphic -> actual decoded MP4; editor unchanged")
+
+def test_whole_source_saved_revision_actual_export(tmp_path,monkeypatch):
+    """20-second source, two nonadjacent confirmed removals, real A/V output."""
+    import numpy as np
+    from autoreels.orchestr import synthetic_whole as whole
+    editor=tmp_path/"editor"
+    editor.mkdir()
+    stage=tmp_path/"stage"
+    stage.mkdir()
+    ffprobe=_stage_config(stage,monkeypatch)
+    cfg=stage/"config/render.local.yaml"
+    overlay=yaml.safe_load(cfg.read_text())
+    overlay.update(same_shot_dissolve_frames=0,two_shot_xfade=False)
+    overlay["audio_processing"]["video_xfade_sec"]=0.0
+    cfg.write_text(yaml.safe_dump(overlay),encoding="utf-8")
+    initial=whole.view(editor,True)
+    target=next(p for p in initial.plans if p.removed==[2,4])
+    state=whole.command(editor,True,whole.WholeCommand(op_id="whole-export",base_revision=0,
+        base_plan_sha256=initial.plan_sha256,clip_uid=initial.clip_uid,
+        candidate_plan_sha256=target.plan_sha256,removed=[2,4]))
+    head=whole.snapshot(editor,state.revision,state.plan_sha256)
+    db_path=editor/".ui-synthetic-editor.sqlite3"
+    db_before=sha(db_path)
+    source=stage/"inputs/DEMO.mp4"
+    tones=(330,550,770,990,1210)
+    # Exact per-sentence synthetic audio spans, with distinct tones and silence at edges.
+    args=["-v","error","-f","lavfi","-i","testsrc2=size=96x160:rate=30:duration=20"]
+    filters=[]
+    for i,(hz,row) in enumerate(zip(tones,state.review.sentences),1):
+        args+=["-f","lavfi","-i",f"sine=frequency={hz}:sample_rate=48000:duration={(row.end_ms-row.start_ms)/1000:.3f}"]
+        filters.append(f"[{i}:a]adelay={row.start_ms}:all=1,apad=whole_dur=20[a{i}]")
+    filters.append("".join(f"[a{i}]" for i in range(1,6))+"amix=inputs=5:normalize=0[a]")
+    run(*args,"-filter_complex",";".join(filters),"-map","0:v:0","-map","[a]",
+        "-c:v","libx264","-threads","2","-preset","ultrafast","-pix_fmt","yuv420p",
+        "-c:a","aac","-t","20",source)
+    original=head.manifest()
+    source_digest=sha(source)
+    staged=original.model_copy(update={"source_sha256":source_digest})
+    plan=stage/"reviews/DEMO.review.json"
+    plan.write_text(staged.model_dump_json())
+    plan_digest=sha(plan)
+    assert Manifest.model_validate_json(plan.read_bytes()).model_copy(
+        update={"source_sha256":original.source_sha256})==original
+    bound=staged_executor.bind(stage,job_id="whole-export",target_id="ci-desktop",
+                               stem="DEMO",clip="r01",gate="ui-ffmpeg")
+    observed={}
+    def energy(path):
+        pcm=run("-v","error","-i",path,"-map","0:a:0","-ac","1","-ar","48000","-f","s16le","-")
+        samples=np.frombuffer(pcm,dtype="<i2").astype(float)
+        result=np.zeros(5)
+        window=np.hanning(4800)
+        for offset in range(0,len(samples)-4799,2400):
+            spectrum=np.abs(np.fft.rfft(samples[offset:offset+4800]*window))**2
+            result += [spectrum[round(hz/10)-1:round(hz/10)+2].sum() for hz in tones]
+        return result
+    reference=energy(source)
+    def validate(output):
+        info=json.loads(run("-v","error","-show_streams","-of","json",output,binary=ffprobe))
+        v=next(s for s in info["streams"] if s["codec_type"]=="video")
+        a=next(s for s in info["streams"] if s["codec_type"]=="audio")
+        assert abs(float(v["duration"])-target.duration)<0.15
+        assert abs(float(v["duration"])-float(a["duration"]))<0.05
+        run("-v","error","-xerror","-i",output,"-f","null","-")
+        actual=energy(output)
+        assert all(actual[i]>0.25*reference[i] for i in (0,2,4))
+        assert max(actual[1],actual[3])<0.001*min(actual[0],actual[2],actual[4])
+        assert sha(source)==source_digest and sha(plan)==plan_digest
+        observed["sha"]=sha(output)
+    with closing(sqlite3.connect(stage/"whole-jobs.sqlite")) as db:
+        ledger=execution.Ledger(db)
+        ledger.submit(bound.request)
+        job=staged_executor.run_supervised_bound(ledger,bound,worker_id="ci-worker",
+            clock_ms=lambda:time.monotonic_ns()//1_000_000,
+            fixture_argv=(sys.executable,str(Path(__file__).with_name("staged_fixture_child.py")),
+                          str(stage),"DEMO","r01","ui-ffmpeg"),verify=validate,timeout_sec=60)
+        assert job.status=="success" and job.artifact_sha256==observed["sha"]
+    assert sha(db_path)==db_before and whole.view(editor,True)==state
+    assert not (stage/"inputs-archive").exists()
+    print(f"UI-504E PASS: 20s -> {target.duration:.3f}s; two confirmed removals, retained tones and immutable saved revision")

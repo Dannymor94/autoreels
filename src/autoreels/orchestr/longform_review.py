@@ -61,7 +61,7 @@ def build_review(sentences: Sequence[Sequence[Word]], source_duration_ms: int) -
         candidates=[LongformCandidate(**asdict(p)) for p in find_repeat_candidates(sentences)])
 
 
-def synthetic_review() -> LongformReview:
+def synthetic_sentences() -> list[list[Word]]:
     texts = ("Сегодня мы поговорим о внимании.",
              "Сегодня мы поговорим о внимании!",
              "Я хочу вам рассказать...",
@@ -69,4 +69,8 @@ def synthetic_review() -> LongformReview:
              "Эту мысль важно сохранить.")
     sentences = [[Word(word=word,t0=i*4+0.2+j*0.5,t1=i*4+0.55+j*0.5)
                   for j,word in enumerate(text.split())] for i,text in enumerate(texts)]
-    return build_review(sentences,20000)
+    return sentences
+
+
+def synthetic_review() -> LongformReview:
+    return build_review(synthetic_sentences(),20000)
