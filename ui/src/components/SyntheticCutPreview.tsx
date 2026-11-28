@@ -251,11 +251,27 @@ export function SyntheticCutPreview() {
     equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[])&&equal(p.crop??[],plan.crop??[])&&equal(p.music??[],plan.music??[]));
   const graphic=plan.graphic;
   const customGraphic=graphicDraft??graphic;
-  const splitLayers=(code:number[]|null|undefined)=>code?Array.from({length:code.length/7},(_,i)=>code.slice(i*7,i*7+7)):[];
+  const splitLayers=(code:number[]|null|undefined)=>{
+    if(!code)return [];
+    if(code[0]===1000){
+      const body=code.slice(1);
+      return Array.from({length:body.length/9},(_,i)=>{
+        const layer=body.slice(i*9,i*9+9);
+        return layer[7]===100&&layer[8]===100?layer.slice(0,7):layer;
+      });
+    }
+    return Array.from({length:code.length/7},(_,i)=>code.slice(i*7,i*7+7));
+  };
+  const joinLayers=(items:number[][])=>items.some(layer=>layer.length===9)?
+    [1000,...items.flatMap(layer=>layer.length===9?layer:[...layer,100,100])]:items.flat();
+  function layerPosition(layer:number[],axis:0|1){
+    const progress=Math.max(0,Math.min(1,(position*1000-layer[4])/(layer[5]-layer[4])));
+    return layer.length===9?layer[axis]+(layer[7+axis]-layer[axis])*progress:layer[axis];
+  }
   const layers=splitLayers(graphic);
   const draftLayers=splitLayers(customGraphic);
   function editLayers(next:number[][]){
-    setGraphicDraft(next.flat());setGraphicError(false);
+    setGraphicDraft(joinLayers(next));setGraphicError(false);
   }
   async function applyGraphic(code=customGraphic){
     const state=q.data;
@@ -267,7 +283,7 @@ export function SyntheticCutPreview() {
     finally{guard.current=false;setPreviewBusy(false);}
     if(next)changePlan(next);
   }
-  const graphicNames=(code:number[]|null|undefined)=>!code?"Без графики":code.length>7?("Графические слои: "+code.length/7):
+  const graphicNames=(code:number[]|null|undefined)=>!code?"Без графики":code[0]===1000?("Слои с движением: "+splitLayers(code).length):code.length>7?("Графические слои: "+code.length/7):
     (code[6]===4?"Тестовый B-roll":code[6]===3?"Тестовое изображение":code[6]===1?"Белый":"Синий")+" · "+code[0]+"%, "+code[1]+"% · "+code[2]+"×"+code[3]+"% · "+seconds(code[4]/1000)+" – "+seconds(code[5]/1000);
   const dip=plan.dip_ms??0;
   const opacity=dip?Math.max(0,...plan.windows.slice(0,-1).map(w=>1-Math.abs(position-w.output_end)/(dip/1000))):0;
@@ -339,7 +355,7 @@ export function SyntheticCutPreview() {
         onError={()=>{stopMusic();setError(true);setPlaying(false);}} />
       {dip>0&&<div className="cut-dip-overlay" aria-hidden="true" style={{opacity}}/>}
       {layers.map((graphic,i)=>position>=graphic[4]/1000&&position<graphic[5]/1000&&<div key={i} className="cut-graphic-overlay" aria-hidden="true"
-        style={{position:"absolute",left:graphic[0]+"%",top:graphic[1]+"%",width:graphic[2]+"%",height:graphic[3]+"%",background:graphic[6]>=3?"black":graphic[6]===1?"white":"blue",pointerEvents:"none"}}>
+        style={{position:"absolute",left:layerPosition(graphic,0)+"%",top:layerPosition(graphic,1)+"%",width:graphic[2]+"%",height:graphic[3]+"%",background:graphic[6]>=3?"black":graphic[6]===1?"white":"blue",pointerEvents:"none"}}>
         {graphic[6]===3&&<img src="/synthetic-graphic-image.png" alt="" style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>}
         {graphic[6]===4&&<BrollPreview time={position-graphic[4]/1000} playing={playing&&!busy}/>} 
       </div>)}
@@ -386,8 +402,8 @@ export function SyntheticCutPreview() {
           <strong>{asset.format==="png"?"Тестовая фотография":"Тестовый B-roll"}</strong>
           <p className="secondary">{asset.format.toUpperCase()} · {asset.label}</p>
           <button type="button" disabled={locked||!!graphicDraft||!canAdd}
-            onClick={()=>void applyGraphic([...layers.flat(),10,10,25,25,0,
-              Math.min(asset.number===4?1000:500,Math.floor(plan.duration*1000)),asset.number])}>
+            onClick={()=>void applyGraphic(joinLayers([...layers,[10,10,25,25,0,
+              Math.min(asset.number===4?1000:500,Math.floor(plan.duration*1000)),asset.number]]))}>
             Добавить в монтаж · {asset.format.toUpperCase()}</button>
           {graphic&&<button type="button" disabled={locked||!!graphicDraft||!target||target.plan_sha256===plan.plan_sha256}
             onClick={()=>target&&changePlan(target)}>Заменить текущие слои · {asset.format.toUpperCase()}</button>}
@@ -425,6 +441,18 @@ export function SyntheticCutPreview() {
         {layer[6]<=2&&<label>Цвет<select aria-label={"Цвет слоя "+(index+1)} value={layer[6]} disabled={locked}
           onChange={e=>editLayers(draftLayers.map((item,j)=>j===index?item.map((n,k)=>k===6?Number(e.currentTarget.value):n):item))}>
           <option value={1}>Белый</option><option value={2}>Синий</option></select></label>}
+        {layer[6]>=3&&<>
+          <label><input type="checkbox" checked={layer.length===9} disabled={locked}
+            aria-label={"Движение слоя "+(index+1)}
+            onChange={e=>editLayers(draftLayers.map((item,j)=>j!==index?item:e.target.checked?
+              [...item.slice(0,7),item[0],item[1]]:item.slice(0,7)))}/> Движение между ключевыми кадрами</label>
+          {layer.length===9&&["Конечный X, %","Конечный Y, %"].map((label,i)=><label key={label}>{label}
+            <input type="number" step={1} min={0} max={100-layer[2+i]} value={layer[7+i]} disabled={locked}
+              aria-label={label+" слоя "+(index+1)}
+              onChange={e=>editLayers(draftLayers.map((item,j)=>j===index?
+                item.map((n,k)=>k===7+i?e.currentTarget.valueAsNumber||0:n):item))}/></label>)}
+          {layer.length===9&&<p className="secondary">Первый кадр — начало слоя, второй — конец. Линейное движение, размер неизменен.</p>}
+        </>}
         {draftLayers.length>1&&<>
           <button type="button" disabled={locked||index===0} onClick={()=>{const next=[...draftLayers];[next[index-1],next[index]]=[next[index],next[index-1]];editLayers(next);}}>Слой {index+1} ниже</button>
           <button type="button" disabled={locked||index===draftLayers.length-1} onClick={()=>{const next=[...draftLayers];[next[index+1],next[index]]=[next[index],next[index+1]];editLayers(next);}}>Слой {index+1} выше</button>

@@ -871,6 +871,19 @@ def test_custom_solid_stack_preview_save_reload_undo_redo(client,tmp_root):
     mixed_saved=choose(redone,mixed_result.json(),"mixed")
     assert client.get(path).json()==mixed_saved
     assert mixed_saved["history"][0]["graphic"]==mixed
+    motion=[1000,10,10,25,25,0,500,3,60,10,40,10,25,25,0,1000,4,100,100]
+    motion_params={**params,"base_revision":mixed_saved["revision"],"base_plan_sha256":mixed_saved["plan_sha256"],
+                   "graphic":",".join(map(str,motion))}
+    response=client.get(path+"/graphic-preview",params=motion_params)
+    assert response.status_code==200,response.text
+    assert response.json()["graphic"]==motion
+    bad=motion.copy()
+    bad[8]=90
+    assert client.get(path+"/graphic-preview",params={**motion_params,"graphic":",".join(map(str,bad))}).status_code==409
+    moved=choose(mixed_saved,response.json(),"motion")
+    assert client.get(path).json()==moved
+    assert moved["history"][0]["graphic"]==motion
+    assert choose(moved,mixed_result.json(),"motion-undo","undo")["plan_sha256"]==mixed_saved["plan_sha256"]
 
 def test_register_bundled_media_in_local_library(tmp_path):
     from autoreels.orchestr.synthetic_asset_catalog import register_fixture_assets, VISUAL_ASSETS

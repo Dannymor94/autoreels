@@ -1,0 +1,3 @@
+# UI-503D — motion keyframes in synthetic editor
+
+Existing static layer codes and saved bytes remain unchanged. Prefix 1000 distinguishes optional end-position groups, static groups encoded as 100,100 in mixed motion stacks. Exact preview, typed bounds, existing CAS/history and saved export adapter reused. Browser preview interpolates positions on output clock; API and browser regression cover motion, reload and undo. Existing UI-503C actual FFmpeg motion proof reused. Synthetic only, two positions, fixed size, linear interpolation, no real media, new dependencies or deployment. Exact-head CI.

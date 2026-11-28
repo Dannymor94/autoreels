@@ -69,13 +69,14 @@ async function mock(page, mode = "normal") {
       const stack={...graphic,graphic:[...graphic.graphic,20,10,20,20,0,500,2],plan_sha256:"0".repeat(64)};
       const mixed={...stack,graphic:[...stack.graphic,10,10,25,25,0,500,3],plan_sha256:"12".repeat(32)};
       const allMedia={...mixed,graphic:[...mixed.graphic,10,10,25,25,0,1000,4],plan_sha256:"13".repeat(32)};
-      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image,broll,custom,stack,mixed,allMedia];
+      const motion={...allMedia,graphic:[1000,...allMedia.graphic.slice(0,7),100,100,...allMedia.graphic.slice(7,14),100,100,...allMedia.graphic.slice(14,21),60,10,...allMedia.graphic.slice(21),100,100],plan_sha256:"14".repeat(32)};
+      const plans=[baseline,candidate,reordered,permutation([3,1,2],"e"),trimmed,rated,framed,scored,quieter,dipped,graphic,image,broll,custom,stack,mixed,allMedia,motion];
       assert.equal(new Set(plans.map(p=>p.plan_sha256)).size,plans.length,"mock plan digests must be distinct");
       if(path.endsWith("/graphic-preview")){
         assert.equal(url.searchParams.get("base_revision"),String(cutRevision));
         assert.equal(url.searchParams.get("base_plan_sha256"),cutSha);
         assert.equal(url.searchParams.get("clip_uid"),"c".repeat(64));
-        const result=[custom,stack,mixed,allMedia,image,broll].find(p=>p.graphic.join(",")===url.searchParams.get("graphic"));
+        const result=[custom,stack,mixed,allMedia,image,broll,motion].find(p=>p.graphic.join(",")===url.searchParams.get("graphic"));
         assert.ok(result,"mock layer candidate not available");
         return route.fulfill({json:result});
       }
@@ -470,6 +471,18 @@ async function main() {
           await page.reload();
           await cut.getByText("Ревизия нарезки: 35",{exact:true}).waitFor();
           await page.waitForFunction(()=>document.querySelectorAll(".cut-graphic-overlay").length===4);
+
+          const motionToggle=cut.getByRole("checkbox",{name:"Движение слоя 3",exact:true});
+          if(!await motionToggle.isVisible())await cut.getByText("Точная настройка слоя",{exact:true}).click();
+          await motionToggle.check();
+          await cut.getByLabel("Конечный X, % слоя 3",{exact:true}).fill("60");
+          await cut.getByRole("button",{name:"Применить параметры",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 36",{exact:true}).waitFor();
+          await page.reload();
+          await cut.getByText("Ревизия нарезки: 36",{exact:true}).waitFor();
+          await cut.getByText("Точная настройка слоя",{exact:true}).click();
+          assert.equal(await motionToggle.isChecked(),true);
+          assert.equal(await cut.getByLabel("Конечный X, % слоя 3",{exact:true}).inputValue(),"60");
 
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");
