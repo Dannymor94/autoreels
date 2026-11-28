@@ -4346,6 +4346,8 @@ def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_pa
         payload["seam_dip_ms"] = reel.seam_dip_ms
     if getattr(reel, "graphic_layer", None) is not None:
         payload["graphic_layer"] = reel.graphic_layer.model_dump(mode="json")
+    if getattr(reel, "graphic_layers", None) is not None:
+        payload["graphic_layers"] = [layer.model_dump(mode="json") for layer in reel.graphic_layers]
     if getattr(reel, "background_track", None) is not None:
         # Explicit edit is authoritative, not the legacy global music selection.
         payload["music"] = None

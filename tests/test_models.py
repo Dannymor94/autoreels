@@ -249,3 +249,22 @@ def test_explicit_local_png_asset_identity_and_dimensions(tmp_path):
     path.write_bytes(raw[:33])
     with pytest.raises(ValueError):
         resolve_image_asset(root,asset)
+
+def test_graphic_layer_stack_is_ordered_exclusive_and_bounded():
+    import pytest
+    from autoreels.core.models import GraphicLayer, Segment, ImageAsset
+    base=Reel(id="r01",start=0,end=3,score=80,hook="",title="",description="",
+              planned=True,segments=[Segment(start=0,end=3)])
+    first=GraphicLayer(x_pct=10,y_pct=10,width_pct=30,height_pct=30,start_ms=500,end_ms=2000,color="white")
+    second=first.model_copy(update={"color":"blue","start_ms":1000})
+    assert "graphic_layers" not in base.model_dump()
+    ordered=Reel.model_validate({**base.model_dump(),"graphic_layers":[first,second]})
+    assert Reel.model_validate_json(ordered.model_dump_json())==ordered
+    assert ordered.model_dump_json()!=ordered.model_copy(update={"graphic_layers":[second,first]}).model_dump_json()
+    asset=ImageAsset(sha256="b"*64,label="test",width=10,height=10,rights="synthetic",rights_note="test")
+    image=first.model_copy(update={"color":None,"image":asset})
+    for layers in ([],[first]*5,[image],[first.model_copy(update={"end_ms":3100})]):
+        with pytest.raises(ValueError):
+            Reel.model_validate({**base.model_dump(),"graphic_layers":layers})
+    with pytest.raises(ValueError):
+        Reel.model_validate({**base.model_dump(),"graphic_layer":first,"graphic_layers":[second]})

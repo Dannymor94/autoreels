@@ -405,7 +405,7 @@ def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
     assert base.setup.crop.model_dump()==dict(x=0,y=0,w=96,h=160)
 
 
-@pytest.mark.parametrize("dip,kind", [(None,"none"),(200,"solid"),(200,"image"),(200,"video")])
+@pytest.mark.parametrize("dip,kind", [(None,"none"),(200,"solid"),(200,"image"),(200,"video"),(200,"stack")])
 def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, kind):
     import numpy as np
     from autoreels.core.models import AudioAsset, BackgroundTrack, GraphicLayer, ImageAsset, Segment, VideoAsset
@@ -461,24 +461,33 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
     graphic = GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
                            start_ms=1000,end_ms=2000,color=None if image or video else "white",
                            image=image,video=video) if dip else None
+    layers = None
+    if kind=="stack":
+        layers=[graphic,GraphicLayer(x_pct=20,y_pct=10,width_pct=20,height_pct=20,
+                                    start_ms=1400,end_ms=1800,color="blue")]
+        graphic=None
     if image:
         with pytest.raises(ValueError):
             GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
                          start_ms=1000,end_ms=2000,color="white",image=image)
     reel=Reel(id="r01",start=0,end=5,score=80,hook="",title="",description="",
               planned=True,segments=[Segment(start=0,end=2),Segment(start=3,end=5)],
-              window_rates=[0.5,2.0],background_track=track,seam_dip_ms=dip,graphic_layer=graphic)
+              window_rates=[0.5,2.0],background_track=track,seam_dip_ms=dip,graphic_layer=graphic,graphic_layers=layers)
     manifest=Manifest(source=source.name,source_sha256=sha(source),duration_preset="shorts",run_key="music-fixture",
         setup=SetupProfile(setup_id="synthetic",crop=Crop(x=0,y=0,w=96,h=160),
                            frame=[96,160],scale=[360,640]),reels=[reel])
-    if graphic:
+    if graphic or layers:
         from autoreels.__main__ import _reel_render_fingerprint
         def fingerprint(r):
             return _reel_render_fingerprint(r,setup=manifest.setup,palette="neutral",
                                             profile="h264",zoom_on=False,music_path=None)
-        assert fingerprint(reel)!=fingerprint(reel.model_copy(update={"graphic_layer":None}))
-        assert fingerprint(reel)!=fingerprint(reel.model_copy(
-            update={"graphic_layer":graphic.model_copy(update={"start_ms":1100})}))
+        if graphic:
+            assert fingerprint(reel)!=fingerprint(reel.model_copy(update={"graphic_layer":None}))
+            assert fingerprint(reel)!=fingerprint(reel.model_copy(
+                update={"graphic_layer":graphic.model_copy(update={"start_ms":1100})}))
+        else:
+            assert fingerprint(reel)!=fingerprint(reel.model_copy(update={"graphic_layers":None}))
+            assert fingerprint(reel)!=fingerprint(reel.model_copy(update={"graphic_layers":list(reversed(layers))}))
     plan=tmp_path/"reviews/DEMO.review.json"
     plan.write_text(manifest.model_dump_json())
     bound=staged_executor.bind(tmp_path,job_id="music",target_id="local",stem="DEMO",clip="r01",gate="ui-ffmpeg")
@@ -529,6 +538,18 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, 
             else:
                 assert white_share(1.5)>0.95
                 assert white_share(0.5)<0.5 and white_share(2.5)<0.5
+        if layers:
+            def patch(t,x0,x1):
+                frame=run("-v","error","-ss",str(t),"-i",output,"-frames:v","1",
+                          "-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
+                return np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)[80:180,x0:x1].astype(float)
+            # Later blue layer overlaps white, but only in its own interval.
+            assert np.all(patch(1.2,80,100)>230,axis=2).mean()>0.95
+            overlap=patch(1.6,80,100)
+            assert (overlap[:,:,2]-overlap[:,:,0]>120).mean()>0.95
+            assert np.all(patch(1.6,45,65)>230,axis=2).mean()>0.95
+            assert np.all(patch(1.9,80,100)>230,axis=2).mean()>0.95
+            assert np.all(patch(2.5,80,100)>230,axis=2).mean()<0.5
         observed["sha"]=sha(output)
     with closing(sqlite3.connect(tmp_path/"music-jobs.sqlite")) as db:
         ledger=execution.Ledger(db)
