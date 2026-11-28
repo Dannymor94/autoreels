@@ -388,9 +388,9 @@ class Reel(BaseModel):
         if self.graphic_layers is not None:
             if self.graphic_layer is not None or not 1<=len(self.graphic_layers)<=4:
                 raise ValueError("use one legacy layer or a bounded ordered layer stack")
-            if any(layer.color is None or layer.image is not None or layer.video is not None
-                   for layer in self.graphic_layers):
-                raise ValueError("layer stack supports solid graphics only")
+            if (sum(layer.image is not None for layer in self.graphic_layers)>1
+                    or sum(layer.video is not None for layer in self.graphic_layers)>1):
+                raise ValueError("layer stack supports at most one image and one video")
         from autoreels.core.playback_timing import build_window_timing
         layers = [GraphicLayer.model_validate_json(layer.model_dump_json())
                   for layer in self.graphic_layers or [self.graphic_layer]]
@@ -404,6 +404,12 @@ class Reel(BaseModel):
         timing = build_window_timing(windows, self.window_rates or [1.0] * len(windows))
         if any(layer.end_ms / 1000 > timing[-1].output_end + 1e-9 for layer in layers):
             raise ValueError("graphic layer extends beyond montage duration")
+
+    def visual_layers(self) -> list[GraphicLayer]:
+        """Ordered back-to-front visual layers, including legacy single-layer plans."""
+        if self.graphic_layers is not None:
+            return list(self.graphic_layers)
+        return [self.graphic_layer] if self.graphic_layer is not None else []
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.

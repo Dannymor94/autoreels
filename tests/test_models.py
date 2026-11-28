@@ -263,7 +263,9 @@ def test_graphic_layer_stack_is_ordered_exclusive_and_bounded():
     assert ordered.model_dump_json()!=ordered.model_copy(update={"graphic_layers":[second,first]}).model_dump_json()
     asset=ImageAsset(sha256="b"*64,label="test",width=10,height=10,rights="synthetic",rights_note="test")
     image=first.model_copy(update={"color":None,"image":asset})
-    for layers in ([],[first]*5,[image],[first.model_copy(update={"end_ms":3100})]):
+    mixed=Reel.model_validate({**base.model_dump(),"graphic_layers":[image,first]})
+    assert mixed.visual_layers()==[image,first]
+    for layers in ([],[first]*5,[image,image],[first.model_copy(update={"end_ms":3100})]):
         with pytest.raises(ValueError):
             Reel.model_validate({**base.model_dump(),"graphic_layers":layers})
     with pytest.raises(ValueError):
