@@ -574,7 +574,9 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
              and p.crop==framed.crop and p.order==[3,1] and p.removed==[2]
              and not p.rates and not p.trim)
     view=choose(view,dip,"export-transition")
-    graphic=next(p for p in view.plans if p.graphic==[10,10,20,20,0,500,1])
+    from autoreels.orchestr.synthetic_image import IMAGE, IMAGE_NAME
+    assert sha(public/IMAGE_NAME)==IMAGE.sha256
+    graphic=next(p for p in view.plans if p.graphic==[10,10,25,25,0,500,3])
     view=choose(view,graphic,"export-graphic")
     assert synthetic_cut.view(editor,True)==view
     db_path=editor/".ui-synthetic-editor.sqlite3"
@@ -595,7 +597,9 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
     reel=manifest.reels[0]
     assert [w.word for w in reel.subtitles]==["Продолжение.","Начало."]
     assert reel.background_track.volume==0.2 and reel.seam_dip_ms==200
-    assert reel.graphic_layer.model_dump()==dict(x_pct=10,y_pct=10,width_pct=20,height_pct=20,start_ms=0,end_ms=500,color="white")
+    assert reel.graphic_layer.image==IMAGE
+    assert reel.graphic_layer.color is None
+    assert sha(stage/"assets"/(IMAGE.sha256+".png"))==IMAGE.sha256
     assert sha(plan)==prepared.staged_plan_sha256
     with pytest.raises(ValueError):
         saved_cut_export.prepare_saved_cut(editor,stage,public,revision=view.revision,
@@ -612,7 +616,10 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
         frame=run("-v","error","-ss","0.2","-i",output,"-frames:v","1",
                   "-vf","scale=360:640","-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
         rgb=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)
-        assert np.all(rgb[72:184,42:102]>230,axis=2).mean()>0.95
+        left=rgb[80:200,45:65].astype(float)
+        right=rgb[80:200,95:115].astype(float)
+        assert (left[:,:,0]-left[:,:,2]>120).mean()>0.9
+        assert (right[:,:,2]-right[:,:,0]>120).mean()>0.9
         assert ledger.get("saved-cut-export")==job
     assert not (stage/"inputs-archive").exists()
     assert sha(db_path)==db_before

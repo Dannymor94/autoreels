@@ -1,7 +1,7 @@
 """Trusted offline adapter for exporting a saved synthetic editor revision.
 
 Not registered with HTTP, live job queues or remote targets. Only the exact
-bundled preview and generated soundtrack assets are accepted. The synthetic
+bundled preview and generated soundtrack/image assets are accepted. The synthetic
 editor database keeps its original placeholder source identity; a separate
 staged manifest binds the actual media bytes, with an explicit receipt.
 """
@@ -21,6 +21,7 @@ from . import editor_revisions as revisions, staged_executor, synthetic_cut
 from .pathguard import safe_path
 from .synthetic_editor import _MAX_REVISION, _path
 from .synthetic_soundtrack import TRACKS
+from .synthetic_image import IMAGE, IMAGE_NAME
 
 PREVIEW_SHA256 = "c87ea2fffefd6d17905ec71cef3ad94659ff1fbee110fb670aab2ac1e43d3848"
 _STEM = "SYNTHETIC_CUT"
@@ -117,6 +118,14 @@ def prepare_saved_cut(editor_root: Path, workspace: Path, public_dir: Path, *,
         asset_raw = _read_fixed(public_dir, f"synthetic-soundtrack-{TRACKS.index(track.asset)+1}.wav",
                                 track.asset.sha256)
 
+    layer = manifest.reels[0].graphic_layer
+    image = layer.image if layer is not None else None
+    image_raw = None
+    if image is not None:
+        if image != IMAGE:
+            raise ValueError("unsupported synthetic graphic image")
+        image_raw = _read_fixed(public_dir, IMAGE_NAME, image.sha256)
+
     # All media paths are derived from fixed selectors. The trusted executor
     # owns the workspace exclusively; this is not hostile-local-user isolation.
     source = workspace / "inputs" / manifest.source
@@ -151,10 +160,14 @@ def prepare_saved_cut(editor_root: Path, workspace: Path, public_dir: Path, *,
         raise ValueError("staging changed the edit plan")
     with plan.open("xb") as handle:
         handle.write(raw)
-    if track is not None:
+    if track is not None or image is not None:
         assets.mkdir()
+    if track is not None:
         with (assets / (track.asset.sha256 + ".wav")).open("xb") as handle:
             handle.write(asset_raw)
+    if image is not None:
+        with (assets / (image.sha256 + ".png")).open("xb") as handle:
+            handle.write(image_raw)
     bound = staged_executor.bind(workspace, job_id=job_id, target_id="synthetic-desktop",
                                  stem=_STEM, clip="r01", gate="ui-editor-export")
     if bound.request.plan_sha256 != _digest(raw):
