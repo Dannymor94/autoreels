@@ -19,8 +19,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from autoreels.core.models import Crop, GraphicLayer, Manifest
 from .synthetic_soundtrack import soundtrack
-from .synthetic_image import IMAGE
-from .synthetic_video import VIDEO
+from .synthetic_asset_catalog import VISUAL_ASSETS
+
+_VISUALS = dict(VISUAL_ASSETS)
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 OpaqueId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
@@ -77,8 +78,8 @@ def graphic_for(code):
     try:
         return GraphicLayer(x_pct=x, y_pct=y, width_pct=w, height_pct=h,
                             start_ms=start, end_ms=end, color={1:"white",2:"blue"}.get(color),
-                            image=IMAGE if color==3 else None,
-                            video=VIDEO if color==4 else None)
+                            image=_VISUALS[3] if color==3 else None,
+                            video=_VISUALS[4] if color==4 else None)
     except ValueError as exc:
         raise Conflict("invalid fixture graphic") from exc
 

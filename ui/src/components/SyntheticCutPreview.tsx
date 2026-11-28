@@ -373,6 +373,30 @@ export function SyntheticCutPreview() {
       {dip>0&&plan.windows.slice(0,-1).map((w,i)=><span key={i} style={{left:((w.output_end-dip/1000)/plan.duration*100)+"%",width:(2*dip/1000/plan.duration*100)+"%"}}/>)}
     </div>
     <p className="secondary">Затемнение не меняет длительность, звук или время субтитров. Для несовместимых коротких фрагментов сначала отключи переход.</p>
+    <h3>Библиотека медиа</h3>
+    <p className="secondary">Встроенные тестовые материалы. Личные файлы не загружаются.</p>
+    <div className="media-catalog">
+      {q.data.visual_assets.map(asset=>{
+        const target=graphics.find(p=>p.graphic?.length===7&&p.graphic[6]===asset.number);
+        return <article key={asset.number}>
+          {asset.format==="png"?<img src="/synthetic-graphic-image.png" alt="Тестовая фотография" width={54} height={96}/>:
+            <video src="/synthetic-broll.mp4" muted playsInline preload="metadata" width={54} height={96}/>}
+          <strong>{asset.format==="png"?"Тестовая фотография":"Тестовый B-roll"}</strong>
+          <p className="secondary">{asset.format.toUpperCase()} · {asset.label}</p>
+          <button type="button" disabled={locked||!target||target.plan_sha256===plan.plan_sha256}
+            onClick={()=>target&&changePlan(target)}>{graphic?"Заменить текущие слои":"Добавить в монтаж"} · {asset.format.toUpperCase()}</button>
+          <details><summary>Происхождение файла</summary><p className="secondary">{asset.rights_note}</p><p className="secondary" style={{overflowWrap:"anywhere"}}>SHA-256: {asset.sha256}</p></details>
+        </article>;
+      })}
+      {q.data.soundtracks.map(asset=>{
+        const target=tracks.find(p=>p.music?.[0]===asset.number&&p.music[1]===(music?.[1]??20)&&p.music[2]===(music?.[2]??1)&&p.music[3]===(music?.[3]??1));
+        return <article key={"sound"+asset.number}>
+          <strong>{asset.label}</strong><p className="secondary">WAV · Фоновый звук</p>
+          <button type="button" disabled={locked||!target||target.plan_sha256===plan.plan_sha256}
+            onClick={()=>target&&changePlan(target)}>Выбрать звук · {asset.label}</button>
+        </article>;
+      })}
+    </div>
     <h3>Графический слой</h3>
     <label>Положение, цвет и интервал
       <select aria-label="Графический слой" value={JSON.stringify(graphic??[])} disabled={locked||graphics.length<2}

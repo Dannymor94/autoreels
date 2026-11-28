@@ -392,6 +392,7 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     before = sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*"))
     disabled = client.get("/api/synthetic-cut").json()
     assert disabled["enabled"] is False and disabled["soundtracks"] == []
+    assert disabled["visual_assets"]==[]
     assert disabled["longform_review"] is None
     settings.settings = Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
     response = client.get("/api/synthetic-cut")
@@ -415,6 +416,13 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
         bundled = public / f"synthetic-soundtrack-{asset['number']}.wav"
         assert sha256(bundled.read_bytes()).hexdigest() == asset["sha256"]
         assert asset["rights"] == "synthetic"
+    from autoreels.orchestr.synthetic_asset_catalog import VISUAL_ASSETS, register_fixture_assets
+    from autoreels.local.asset_library import list_assets
+    from autoreels.orchestr.synthetic_image import IMAGE_NAME
+    from autoreels.orchestr.synthetic_video import VIDEO_NAME
+    assert [(a["number"],a["sha256"]) for a in view["visual_assets"]]==[(n,a.sha256) for n,a in VISUAL_ASSETS]
+    for asset,filename in zip(view["visual_assets"],(IMAGE_NAME,VIDEO_NAME)):
+        assert sha256((public/filename).read_bytes()).hexdigest()==asset["sha256"]
     plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"]) and not p["trim"] and not p["rates"] and not p["crop"] and not p["music"] and not p["dip_ms"]}
     baseline, cut = plans[()], plans[(2,)]
     assert len(cut["windows"]) == 2 and 0 < cut["duration"] < baseline["duration"]
@@ -856,3 +864,15 @@ def test_custom_solid_stack_preview_save_reload_undo_redo(client,tmp_root):
     assert restored["plan_sha256"]==initial["plan_sha256"]
     redone=choose(restored,target,"stack-redo","redo")
     assert redone["plan_sha256"]==saved["plan_sha256"]
+
+def test_register_bundled_media_in_local_library(tmp_path):
+    from autoreels.orchestr.synthetic_asset_catalog import register_fixture_assets, VISUAL_ASSETS
+    from autoreels.orchestr.synthetic_soundtrack import TRACKS
+    from autoreels.local.asset_library import list_assets
+    public=Path(__file__).resolve().parents[2]/"ui/public"
+    root=tmp_path/"library"
+    root.mkdir()
+    expected=tuple(sorted((*TRACKS,*(a for _,a in VISUAL_ASSETS)),key=lambda a:(a.sha256,a.format)))
+    assert register_fixture_assets(root,public)==expected
+    assert register_fixture_assets(root,public)==expected
+    assert list_assets(root)==expected
