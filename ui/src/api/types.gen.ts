@@ -314,6 +314,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/synthetic-whole": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Synthetic Whole View */
+        get: operations["synthetic_whole_view_api_synthetic_whole_get"];
+        /** Synthetic Whole Command */
+        put: operations["synthetic_whole_command_api_synthetic_whole_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/thumb/{stem}/{clip}": {
         parameters: {
             query?: never;
@@ -1037,6 +1055,41 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** WholeCommand */
+        WholeCommand: {
+            /** Base Plan Sha256 */
+            base_plan_sha256: string;
+            /** Base Revision */
+            base_revision: number;
+            /** Candidate Plan Sha256 */
+            candidate_plan_sha256: string;
+            /** Clip Uid */
+            clip_uid: string;
+            /** Navigation */
+            navigation?: ("undo" | "redo") | null;
+            /** Op Id */
+            op_id: string;
+            /** Removed */
+            removed: number[];
+        };
+        /** WholeView */
+        WholeView: {
+            /** Clip Uid */
+            clip_uid: string;
+            /** Current Removed */
+            current_removed: number[];
+            /** Enabled */
+            enabled: boolean;
+            /** Plan Sha256 */
+            plan_sha256: string;
+            /** Plans */
+            plans: components["schemas"]["CutPreview"][];
+            redo: components["schemas"]["CutPreview"] | null;
+            review: components["schemas"]["LongformReview"] | null;
+            /** Revision */
+            revision: number;
+            undo: components["schemas"]["CutPreview"] | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -1675,6 +1728,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DemoEditorView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    synthetic_whole_view_api_synthetic_whole_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WholeView"];
+                };
+            };
+        };
+    };
+    synthetic_whole_command_api_synthetic_whole_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WholeCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WholeView"];
                 };
             };
             /** @description Validation Error */

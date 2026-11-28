@@ -1,0 +1,3 @@
+# UI-504F — explicit whole-source cleanup controls
+
+Expose only the existing opt-in synthetic whole-source project through dedicated GET/PUT, shared security middleware and exact revision/hash/UID CAS. Separate UI selects interior sentences manually, shows planned duration and retained intervals, commits only on explicit save, supports undo/redo and refresh after uncertain response. No automatic repeat deletion, real media, production project import, new storage schema or render launch. Existing API/browser regression confirms explicit selection and isolation from short-cut project. Exact-head CI; dependent on UI-504E.

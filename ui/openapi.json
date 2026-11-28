@@ -2264,6 +2264,140 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "WholeCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "base_plan_sha256": {
+            "title": "Base Plan Sha256",
+            "type": "string"
+          },
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "candidate_plan_sha256": {
+            "title": "Candidate Plan Sha256",
+            "type": "string"
+          },
+          "clip_uid": {
+            "title": "Clip Uid",
+            "type": "string"
+          },
+          "navigation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "undo",
+                  "redo"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Navigation"
+          },
+          "op_id": {
+            "title": "Op Id",
+            "type": "string"
+          },
+          "removed": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Removed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op_id",
+          "base_revision",
+          "base_plan_sha256",
+          "clip_uid",
+          "candidate_plan_sha256",
+          "removed"
+        ],
+        "title": "WholeCommand",
+        "type": "object"
+      },
+      "WholeView": {
+        "properties": {
+          "clip_uid": {
+            "title": "Clip Uid",
+            "type": "string"
+          },
+          "current_removed": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Current Removed",
+            "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "plan_sha256": {
+            "title": "Plan Sha256",
+            "type": "string"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/CutPreview"
+            },
+            "title": "Plans",
+            "type": "array"
+          },
+          "redo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CutPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LongformReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "undo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CutPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "review",
+          "revision",
+          "plan_sha256",
+          "clip_uid",
+          "current_removed",
+          "plans",
+          "undo",
+          "redo"
+        ],
+        "title": "WholeView",
+        "type": "object"
       }
     }
   },
@@ -3305,6 +3439,60 @@
           }
         },
         "summary": "Synthetic Editor Command"
+      }
+    },
+    "/api/synthetic-whole": {
+      "get": {
+        "operationId": "synthetic_whole_view_api_synthetic_whole_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WholeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Synthetic Whole View"
+      },
+      "put": {
+        "operationId": "synthetic_whole_command_api_synthetic_whole_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WholeCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WholeView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthetic Whole Command"
       }
     },
     "/api/thumb/{stem}/{clip}": {
