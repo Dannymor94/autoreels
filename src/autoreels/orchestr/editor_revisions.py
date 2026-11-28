@@ -91,8 +91,9 @@ def graphic_fields(code):
     if len(code) not in (14,21,28):
         raise Conflict("invalid fixture layer stack")
     layers=[graphic_for(code[i:i+7]) for i in range(0,len(code),7)]
-    if any(layer.color is None for layer in layers):
-        raise Conflict("fixture stack supports solid graphics only")
+    if (sum(layer.image is not None for layer in layers)>1
+            or sum(layer.video is not None for layer in layers)>1):
+        raise Conflict("fixture stack allows at most one photo and one video")
     return {"graphic_layer":None,"graphic_layers":layers}
 
 

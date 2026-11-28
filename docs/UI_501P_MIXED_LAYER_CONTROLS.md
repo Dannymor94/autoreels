@@ -1,0 +1,3 @@
+# UI-501P — append mixed visual layers without replacement
+
+Reuse exact candidate preview, CAS and existing ordered stack renderer. Append a bundled still or B-roll to the saved layers without losing prior geometry, timing or order. Explicit replacement remains available separately. At most four layers and one of each media type; unfinished layer drafts block catalog changes. Existing UI geometry/order/undo supports mixed stacks. Focused API regression, browser append/reload and actual saved revision export with both bound media assets. Synthetic fixtures only; no owner media, upload, new routes, deployment or new dependencies. Exact-head CI.
