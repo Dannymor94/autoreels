@@ -520,6 +520,8 @@ export interface components {
             soundtracks: components["schemas"]["CutSoundtrackAsset"][];
             /** Source Duration */
             source_duration: number;
+            /** Visual Assets */
+            visual_assets: components["schemas"]["CutSoundtrackAsset"][];
         };
         /** CutPreview */
         CutPreview: {

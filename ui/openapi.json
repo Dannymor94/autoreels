@@ -562,6 +562,13 @@
           "source_duration": {
             "title": "Source Duration",
             "type": "number"
+          },
+          "visual_assets": {
+            "items": {
+              "$ref": "#/components/schemas/CutSoundtrackAsset"
+            },
+            "title": "Visual Assets",
+            "type": "array"
           }
         },
         "required": [
@@ -575,6 +582,7 @@
           "current_removed",
           "history",
           "soundtracks",
+          "visual_assets",
           "longform_review"
         ],
         "title": "CutDemoView",
