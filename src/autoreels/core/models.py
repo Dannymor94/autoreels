@@ -169,7 +169,7 @@ class BackgroundTrack(BaseModel):
 
 
 class GraphicLayer(BaseModel):
-    """One solid rectangle in final-frame percentages and output milliseconds."""
+    """One solid rectangle or explicit PNG in final-frame percentages and output milliseconds."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
     x_pct: int = Field(ge=0, lt=100)
@@ -178,10 +178,20 @@ class GraphicLayer(BaseModel):
     height_pct: int = Field(gt=0, le=100)
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
-    color: Literal["white", "black", "red", "blue"]
+    color: Literal["white", "black", "red", "blue"] | None = None
+    image: ImageAsset | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_image(self, handler):
+        data = handler(self)
+        if self.image is None:
+            data.pop("image", None)
+        return data
 
     @model_validator(mode="after")
     def _bounds(self):
+        if (self.image is None) == (self.color is None):
+            raise ValueError("choose exactly one graphic color or image")
         if (self.x_pct + self.width_pct > 100 or self.y_pct + self.height_pct > 100
                 or self.end_ms <= self.start_ms):
             raise ValueError("invalid graphic rectangle or interval")

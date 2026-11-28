@@ -405,10 +405,10 @@ def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
     assert base.setup.crop.model_dump()==dict(x=0,y=0,w=96,h=160)
 
 
-@pytest.mark.parametrize("dip", [None, 200])
-def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
+@pytest.mark.parametrize("dip,with_image", [(None,False),(200,False),(200,True)])
+def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip, with_image):
     import numpy as np
-    from autoreels.core.models import AudioAsset, BackgroundTrack, GraphicLayer, Segment
+    from autoreels.core.models import AudioAsset, BackgroundTrack, GraphicLayer, ImageAsset, Segment
     from autoreels.core.config import load_render_config
     from autoreels.local.assets import resolve_audio_asset
     from autoreels.local.render import render_crop
@@ -435,8 +435,23 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
     wav.rename(path)
     assert resolve_audio_asset(assets,asset)==path
     track=BackgroundTrack(asset=asset,volume=0.25,fade_seconds=0.0,ducking=False,final_normalize=False)
+    image = None
+    if with_image:
+        png = assets/"test.png"
+        run("-v","error","-f","lavfi","-i","color=red:s=36x64",
+            "-vf","drawbox=x=18:y=0:w=18:h=64:color=blue:t=fill",
+            "-frames:v","1","-threads","1",png)
+        image = ImageAsset(sha256=sha(png),label="Two color still",width=36,height=64,
+                           rights="synthetic",rights_note="generated in CI")
+        image_path = assets/(image.sha256+".png")
+        png.rename(image_path)
     graphic = GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
-                           start_ms=1000,end_ms=2000,color="white") if dip else None
+                           start_ms=1000,end_ms=2000,color=None if image else "white",
+                           image=image) if dip else None
+    if image:
+        with pytest.raises(ValueError):
+            GraphicLayer(x_pct=10,y_pct=10,width_pct=20,height_pct=20,
+                         start_ms=1000,end_ms=2000,color="white",image=image)
     reel=Reel(id="r01",start=0,end=5,score=80,hook="",title="",description="",
               planned=True,segments=[Segment(start=0,end=2),Segment(start=3,end=5)],
               window_rates=[0.5,2.0],background_track=track,seam_dip_ms=dip,graphic_layer=graphic)
@@ -484,6 +499,11 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
                           "-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
                 rgb=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)
                 # Inner rectangle, away from chroma interpolation at its edges.
+                if image:
+                    left=rgb[72:184,42:64].astype(float)
+                    right=rgb[72:184,80:102].astype(float)
+                    return min(float((left[:,:,0]-left[:,:,2]>120).mean()),
+                               float((right[:,:,2]-right[:,:,0]>120).mean()))
                 patch=rgb[72:184,42:102]
                 return float(np.all(patch>230,axis=2).mean())
             assert white_share(1.5)>0.95
@@ -497,6 +517,12 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
             fixture_argv=(sys.executable,str(Path(__file__).with_name("staged_fixture_child.py")),
                           str(tmp_path),"DEMO","r01","ui-ffmpeg"),verify=verify,timeout_sec=30)
         assert job.status=="success" and job.artifact_sha256==observed["sha"]
+    if image:
+        original_image=image_path.read_bytes()
+        image_path.write_bytes(original_image+b"changed")
+        with pytest.raises(ValueError):
+            staged_executor.bind(tmp_path,job_id="music",target_id="local",stem="DEMO",clip="r01",gate="ui-ffmpeg")
+        image_path.write_bytes(original_image)
     old=path.read_bytes()
     path.write_bytes(old+b"changed")
     with pytest.raises(ValueError):
