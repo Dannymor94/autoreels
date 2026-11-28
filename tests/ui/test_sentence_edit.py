@@ -207,3 +207,38 @@ def test_longform_completed_prefix_is_not_a_restart():
              "Мы сегодня не обсуждаем внутреннюю силу."]
     sentences = [[Word(word=word,t0=0.0,t1=0.0) for word in text.split()] for text in texts]
     assert find_repeat_candidates(sentences) == ()
+
+
+def test_whole_source_preserves_edges_and_only_confirmed_interior_cuts():
+    from autoreels.orchestr.longform_review import build_review
+    from autoreels.orchestr.whole_source import propose_whole_source
+    texts=("Начало.","Дубль.","Продолжаем.","Повтор.","Мысль.","Конец.")
+    words=[Word(word=text,t0=i+1.0,t1=i+1.9) for i,text in enumerate(texts)]
+    sentences=[[w] for w in words]
+    smap={"words":[{"idx":i,"t0":w.t0,"t1":w.t1,
+                    "audible_start":w.t0+0.2,"audible_end":w.t0+0.8}
+                   for i,w in enumerate(words)],"boundaries":[]}
+    review=build_review(sentences,8000)
+    args=dict(words=words,smap=smap,source_duration_ms=8000,review_sha256=review.review_sha256)
+    uncut=propose_whole_source(sentences,confirmed=(),**args)
+    assert uncut.reel.playback_duration()==8.0
+    assert len(uncut.reel.segments)==1
+    cut=propose_whole_source(sentences,confirmed=(2,4),**args)
+    assert cut==propose_whole_source(sentences,confirmed=(2,4),**args)
+    assert cut.reel.start==0 and cut.reel.end==8
+    assert len(cut.reel.segments)==3
+    assert cut.reel.playback_duration()<8
+    assert [w.word for w in cut.reel.subtitles]==[texts[i] for i in (0,2,4,5)]
+    for i,w in enumerate(words,1):
+        a,b=w.t0+0.2,w.t0+0.8
+        played=sum(max(0,min(s.end,b)-max(s.start,a)) for s in cut.reel.segments)
+        assert played==pytest.approx(0 if i in (2,4) else b-a)
+    for confirmed in ((1,),(6,),(2,2),(4,2),(True,)):
+        with pytest.raises(edit.Unavailable):
+            propose_whole_source(sentences,confirmed=confirmed,**args)
+    with pytest.raises(edit.Unavailable,match="review changed"):
+        propose_whole_source(sentences,confirmed=(2,),**{**args,"review_sha256":"0"*64})
+    ambiguous=copy.deepcopy(smap)
+    ambiguous["words"][1]["audible_end"]=3.4
+    with pytest.raises(edit.Unavailable):
+        propose_whole_source(sentences,confirmed=(2,),**{**args,"smap":ambiguous})
