@@ -675,7 +675,7 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch, with_broll):
 def test_whole_source_saved_revision_actual_export(tmp_path,monkeypatch):
     """20-second source, two nonadjacent confirmed removals, real A/V output."""
     import numpy as np
-    from autoreels.orchestr import synthetic_whole as whole
+    from autoreels.orchestr import synthetic_whole as whole, synthetic_whole_export as exporter
     editor=tmp_path/"editor"
     editor.mkdir()
     stage=tmp_path/"stage"
@@ -691,31 +691,25 @@ def test_whole_source_saved_revision_actual_export(tmp_path,monkeypatch):
     state=whole.command(editor,True,whole.WholeCommand(op_id="whole-export",base_revision=0,
         base_plan_sha256=initial.plan_sha256,clip_uid=initial.clip_uid,
         candidate_plan_sha256=target.plan_sha256,removed=[2,4]))
-    head=whole.snapshot(editor,state.revision,state.plan_sha256)
+    original=whole.snapshot(editor,state.revision,state.plan_sha256).manifest()
     db_path=editor/".ui-synthetic-editor.sqlite3"
     db_before=sha(db_path)
+    with pytest.raises(whole.revisions.Conflict):
+        exporter.prepare(editor,stage,revision=0,digest=initial.plan_sha256,job_id="stale")
+    assert not (stage/"inputs/DEMO.mp4").exists()
+    prepared=exporter.prepare(editor,stage,revision=state.revision,digest=state.plan_sha256,job_id="whole-export")
     source=stage/"inputs/DEMO.mp4"
-    tones=(330,550,770,990,1210)
-    # Exact per-sentence synthetic audio spans, with distinct tones and silence at edges.
-    args=["-v","error","-f","lavfi","-i","testsrc2=size=96x160:rate=30:duration=20"]
-    filters=[]
-    for i,(hz,row) in enumerate(zip(tones,state.review.sentences),1):
-        args+=["-f","lavfi","-i",f"sine=frequency={hz}:sample_rate=48000:duration={(row.end_ms-row.start_ms)/1000:.3f}"]
-        filters.append(f"[{i}:a]adelay={row.start_ms}:all=1,apad=whole_dur=20[a{i}]")
-    filters.append("".join(f"[a{i}]" for i in range(1,6))+"amix=inputs=5:normalize=0[a]")
-    run(*args,"-filter_complex",";".join(filters),"-map","0:v:0","-map","[a]",
-        "-c:v","libx264","-threads","2","-preset","ultrafast","-pix_fmt","yuv420p",
-        "-c:a","aac","-t","20",source)
-    original=head.manifest()
     source_digest=sha(source)
-    staged=original.model_copy(update={"source_sha256":source_digest})
     plan=stage/"reviews/DEMO.review.json"
-    plan.write_text(staged.model_dump_json())
     plan_digest=sha(plan)
+    assert prepared.editor_plan_sha256==state.plan_sha256
+    assert prepared.staged_source_sha256==source_digest
+    assert prepared.bound.request.plan_sha256==plan_digest
     assert Manifest.model_validate_json(plan.read_bytes()).model_copy(
         update={"source_sha256":original.source_sha256})==original
-    bound=staged_executor.bind(stage,job_id="whole-export",target_id="ci-desktop",
-                               stem="DEMO",clip="r01",gate="ui-ffmpeg")
+    with pytest.raises(ValueError):
+        exporter.prepare(editor,stage,revision=state.revision,digest=state.plan_sha256,job_id="duplicate")
+    tones=exporter.TONES
     observed={}
     def energy(path):
         pcm=run("-v","error","-i",path,"-map","0:a:0","-ac","1","-ar","48000","-f","s16le","-")
@@ -741,12 +735,10 @@ def test_whole_source_saved_revision_actual_export(tmp_path,monkeypatch):
         observed["sha"]=sha(output)
     with closing(sqlite3.connect(stage/"whole-jobs.sqlite")) as db:
         ledger=execution.Ledger(db)
-        ledger.submit(bound.request)
-        job=staged_executor.run_supervised_bound(ledger,bound,worker_id="ci-worker",
-            clock_ms=lambda:time.monotonic_ns()//1_000_000,
-            fixture_argv=(sys.executable,str(Path(__file__).with_name("staged_fixture_child.py")),
-                          str(stage),"DEMO","r01","ui-ffmpeg"),verify=validate,timeout_sec=60)
+        job=exporter.execute_prepared(prepared,ledger,worker_id="ci-worker",ffprobe=ffprobe)
+        output=stage/"reels-out/DEMO/_gate/ui-whole-export/r01.mp4"
+        validate(output)
         assert job.status=="success" and job.artifact_sha256==observed["sha"]
     assert sha(db_path)==db_before and whole.view(editor,True)==state
     assert not (stage/"inputs-archive").exists()
-    print(f"UI-504E PASS: 20s -> {target.duration:.3f}s; two confirmed removals, retained tones and immutable saved revision")
+    print(f"UI-504G PASS: 20s -> {target.duration:.3f}s; two confirmed removals, retained tones and immutable saved revision")
