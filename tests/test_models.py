@@ -210,3 +210,42 @@ def test_graphic_layer_optional_and_bound_to_output_duration():
         Reel.model_validate({**base.model_dump(),"graphic_layer":spec,"planned":False})
     with pytest.raises(ValueError):
         reel.model_copy(update={"graphic_layer":layer.model_copy(update={"end_ms":5001})}).check_segments()
+
+def test_explicit_local_png_asset_identity_and_dimensions(tmp_path):
+    import hashlib
+    import struct
+    import zlib
+    import pytest
+    from autoreels.core.models import ImageAsset
+    from autoreels.local.assets import resolve_image_asset
+
+    def chunk(tag, data):
+        return struct.pack(">I",len(data))+tag+data+struct.pack(">I",zlib.crc32(tag+data))
+    raw = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR",struct.pack(">IIBBBBB",2,1,8,2,0,0,0))
+           +chunk(b"IDAT",zlib.compress(b"\x00\xff\x00\x00\x00\xff\x00"))+chunk(b"IEND",b""))
+    asset = ImageAsset(sha256=hashlib.sha256(raw).hexdigest(),label="Generated PNG",width=2,height=1,
+                       rights="synthetic",rights_note="generated in offline test")
+    root = tmp_path.resolve()
+    path = root/(asset.sha256+".png")
+    path.write_bytes(raw)
+    assert resolve_image_asset(root,asset)==path
+    assert ImageAsset.model_validate_json(asset.model_dump_json())==asset
+    with pytest.raises(ValueError):
+        resolve_image_asset(root,asset.model_copy(update={"width":3}))
+    with pytest.raises(ValueError):
+        resolve_image_asset(root,asset.model_copy(update={"height":5000}))
+    with pytest.raises(ValueError):
+        resolve_image_asset(root,asset.model_copy(update={"sha256":"../image"}))
+    path.write_bytes(raw+b"changed")
+    with pytest.raises(ValueError):
+        resolve_image_asset(root,asset)
+    path.unlink()
+    replacement=root/"other.png"
+    replacement.write_bytes(raw)
+    path.symlink_to(replacement)
+    with pytest.raises(ValueError):
+        resolve_image_asset(root,asset)
+    path.unlink()
+    path.write_bytes(raw[:33])
+    with pytest.raises(ValueError):
+        resolve_image_asset(root,asset)
